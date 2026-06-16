@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4 - 2026-06-16
+
+- Improved the README with a shorter setup flow centered on one backend `ctx`-driven cache action.
+- Added focused example recipes for field buttons, dashboard actions, response effects, async jobs, and sandboxed providers.
+- Documented where field JSON belongs and how provider backend code runs on the EmDash server.
+
 ## 0.2.3 - 2026-06-16
 
 - Fixed terminal feedback button colors so success, error, warning, and info states no longer rely on dynamically emitted important Tailwind classes.

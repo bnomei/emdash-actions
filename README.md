@@ -8,16 +8,17 @@
 
 Action buttons for EmDash fields and dashboards.
 
-`emdash-actions` is a native EmDash UI plugin for rendering configurable action buttons. The primary target is contextual field actions: a button inside a regular content form that can copy a value, call a provider endpoint, or write a returned value back into the field. The package also includes a dashboard widget for global site actions such as clearing caches, triggering rebuilds, toggling maintenance mode, starting exports, or kicking off serverless jobs.
+`@bnomei/emdash-actions` adds configurable buttons to the EmDash admin. A button
+can copy a field value in the browser, call an EmDash plugin route, write a
+returned value back into a field, or trigger a dashboard-level provider action.
 
-The UI package owns the trigger surfaces. Provider plugins own the work behind those triggers. That keeps existing standard, native, or sandboxed plugins independent from this package: they can expose normal EmDash API routes, and `emdash-actions` can render buttons that call those routes.
+The core split is simple:
 
-## Surfaces
+- `emdash-actions` owns the admin UI trigger surfaces.
+- Provider plugins own the backend work behind those triggers.
 
-- `actions:button`: A field widget for content forms. This is the Janitor-like surface and the main reason for the package. It supports `run` mode for backend actions and `clipboard` mode for browser-native copy buttons.
-- `Actions` dashboard widget: A dashboard surface for global/provider actions. It reads provider manifests and renders one button per matching action.
-
-Field buttons become substantially more powerful with entry context. EmDash does not currently expose a stable field-widget context prop or global object, so `emdash-actions` uses a best-effort fallback: it reads the admin route, optionally fetches the saved entry and current user from EmDash APIs, and includes selected context in action payloads or clipboard values.
+That means a provider can be native, standard trusted, or sandboxed, as long as
+it exposes normal EmDash plugin API routes.
 
 ## Install
 
@@ -25,603 +26,322 @@ Field buttons become substantially more powerful with entry context. EmDash does
 vp install @bnomei/emdash-actions
 ```
 
-Register the UI plugin in your EmDash project. This goes in the Astro config file where your `emdash()` integration is configured:
+## Quick Start
+
+This quick start wires a single dashboard button that runs backend TypeScript in
+an EmDash provider route. The example action clears a cache placeholder, writes
+plugin-local state with `ctx.kv`, logs through `ctx.log`, and returns feedback to
+the clicked button.
+
+### 1. Create A Provider
+
+Create `src/emdash/cache-actions.ts`:
 
 ```ts
-// astro.config.mjs
-import { defineConfig } from "astro/config";
-import emdash from "emdash/astro";
-import { actionsPlugin } from "@bnomei/emdash-actions";
-
-export default defineConfig({
-  integrations: [
-    emdash({
-      plugins: [actionsPlugin()],
-    }),
-  ],
-});
-```
-
-This registers the `actions:button` field widget and the `Actions` dashboard widget. Clipboard field buttons work with only this registration.
-
-Configure providers in the same `astro.config.mjs` plugin list when you want buttons to call backend routes or resolve manifest actions:
-
-```ts
-// astro.config.mjs
-import { actionsPlugin } from "@bnomei/emdash-actions";
-
-emdash({
-  plugins: [
-    actionsPlugin({
-      providers: [
-        {
-          pluginId: "site-tools",
-          label: "Site tools",
-        },
-      ],
-    }),
-  ],
-});
-```
-
-## Field Button
-
-Use `actions:button` when an action belongs next to a field in a content form. This is the best fit for contextual tools such as copying or generating an ID, syncing the current field value, refreshing derived metadata, or calling a provider endpoint from a specific content template.
-
-Clipboard mode example. This object is a field definition inside the target collection schema, not an Astro integration option. Put it wherever your project creates or seeds EmDash fields, for example in a seed file exported from `emdash export-seed` or a project-local schema setup script:
-
-```ts
-// seed/schema.ts or seed.json
-// Inside the target collection's fields array:
-{
-  slug: "newsletter_user_uuid",
-  label: "Newsletter user UUID",
-  type: "string",
-  widget: "actions:button",
-  options: {
-    mode: "clipboard",
-    label: "Copy UUID",
-    clipboardSuccess: "UUID copied."
-  }
-}
-```
-
-Clipboard mode can also copy a configured literal value or a nested value from a `json` field. This is still a field definition in the collection schema:
-
-```ts
-// seed/schema.ts or seed.json
-// Inside the target collection's fields array:
-{
-  slug: "newsletter_profile",
-  label: "Newsletter profile",
-  type: "json",
-  widget: "actions:button",
-  options: {
-    mode: "clipboard",
-    label: "Copy remote ID",
-    clipboardValueKey: "remote.id"
-  }
-}
-```
-
-Run mode direct route example. Add this field definition to the collection that should show the button:
-
-```ts
-// seed/schema.ts or seed.json
-// Inside the target collection's fields array:
-{
-  slug: "newsletter_user_uuid",
-  label: "Newsletter user UUID",
-  type: "string",
-  widget: "actions:button",
-  options: {
-    mode: "run",
-    pluginId: "newsletter-actions",
-    route: "copy-user-uuid",
-    method: "POST",
-    label: "Copy UUID",
-    valueKey: "currentValue",
-    contextKey: "entryId",
-    contextValueKey: "entryId",
-    resultValueKey: "uuid"
-  }
-}
-```
-
-Run mode manifest action example. This is also a collection field definition; the button resolves one action from the provider manifest:
-
-```ts
-// seed/schema.ts or seed.json
-// Inside the target collection's fields array:
-{
-  slug: "newsletter_user_uuid",
-  label: "Newsletter user UUID",
-  type: "string",
-  widget: "actions:button",
-  options: {
-    mode: "run",
-    provider: "newsletter-actions",
-    action: "newsletter.copyUserUuid",
-    label: "Copy UUID",
-    valueKey: "currentValue",
-    resultValueKey: "uuid"
-  }
-}
-```
-
-Field button options:
-
-- `mode`: Either `run` or `clipboard`. Defaults to `run`.
-- `pluginId` or `provider`: Plugin id to call.
-- `route`: Direct plugin route to call.
-- `action`: Action id to resolve from the provider manifest. If `route` is omitted in `run` mode, this is required.
-- `method`: HTTP method for direct routes. Defaults to `POST`.
-- `label`: Button label.
-- `description`: Text shown above the button.
-- `confirm`: Confirmation prompt before running.
-- `payload`: Static JSON payload sent with the request.
-- `valueKey`: Include the current field value in the request payload under this key.
-- `contextKey`: Include field context in the request payload under this key.
-- `contextValueKey`: Dot-path to read from field context before writing it to `contextKey`. If omitted, the full context object is sent.
-- `resultValueKey`: Dot-path to read from the final action result and write back into the field.
-- `clipboardText`: Literal string to copy in `clipboard` mode.
-- `clipboardValueKey`: Dot-path to read from the current field value in `clipboard` mode. Defaults to the whole field value.
-- `clipboardContextValueKey`: Dot-path to read from field context in `clipboard` mode.
-- `clipboardSuccess`: Temporary button message shown after copying.
-- `placement`: Manifest action placement to match. Defaults to `field`.
-- `manifestRoute`: Provider manifest route. Defaults to `.well-known/actions`.
-- `allowedTargetPluginIds`: Cross-plugin targets allowed when resolving manifest actions.
-- `cooldownMs`: Time in milliseconds before temporary button feedback resets. Defaults to `2000`.
-- `buttonStyle`: Optional base button colors, for example `{ color, backgroundColor }`.
-  Add `borderColor` for a matching feedback ring. Add `darkColor`,
-  `darkBackgroundColor`, and `darkBorderColor` when the custom colors need
-  different light and dark mode values.
-- `feedback`: Optional temporary labels and styles for `progress`, `success`, and `error` phases.
-- `resultEffect`: Optional primitive response shortcut. If the action endpoint returns a string, this can turn it into a `clipboard`, `open`, or `download` effect.
-- `pollIntervalMs` and `pollTimeoutMs`: Async job polling controls.
-
-Clipboard mode uses the browser `navigator.clipboard.writeText()` API. It requires a secure browser context, usually HTTPS or localhost, and browser permission. It does not call the backend.
-
-### Entry Context
-
-The current EmDash admin renders plugin field widgets with `value`, `onChange`, `label`, `id`, `required`, `options`, and `minimal`. The content editor already has richer context nearby, including collection, entry item, locale/i18n, current user, and full form data, but it does not pass that context into plugin field widgets yet.
-
-`emdash-actions` is ready for this host shape:
-
-```ts
-type ActionButtonContext = {
-  surface: "field" | "dashboard";
-  collection?: string;
-  collectionLabel?: string;
-  fieldName?: string;
-  fieldKind?: string;
-  fieldLabel?: string;
-  fieldRequired?: boolean;
-  entryId?: string;
-  entrySlug?: string;
-  entryStatus?: string;
-  entryLocale?: string | null;
-  isNew?: boolean;
-  fieldValue?: unknown;
-  entryData?: Record<string, unknown>;
-  currentUser?: { id: string; role?: number };
-  i18n?: { defaultLocale?: string; locales?: string[] };
-  translations?: unknown[];
-  formData?: Record<string, unknown>;
-};
-```
-
-Without a host-provided context prop, the field button can still infer:
-
-- `collection`, `entryId`, `isNew`, and URL `locale` from `/_emdash/admin/content/:collection/:id` and `/_emdash/admin/content/:collection/new`.
-- `fieldName` from the host-provided field element id, which currently follows `field-${name}`.
-- `fieldLabel`, `fieldRequired`, and `fieldValue` from the field widget props.
-- `entrySlug`, `entryStatus`, `entryLocale`, and `entryData` by fetching the saved entry from `/_emdash/api/content/:collection/:id`.
-- `currentUser` by fetching `/_emdash/api/auth/me`.
-
-It cannot infer live unsaved values from sibling fields. For those cases, pass the current field value with `valueKey`, put static data in `payload`, or design the provider route to read the latest saved entry server-side.
-
-## Provider Actions
-
-Provider plugins can describe actions with a manifest. The dashboard widget uses the manifest to render buttons, and a field button can resolve a single manifest action by id. Use `placement: "dashboard"` for dashboard-only actions, `placement: "field"` for field actions, or `placement: "global"` for both.
-
-By default, `emdash-actions` loads a provider manifest from:
-
-```txt
-GET /_emdash/api/plugins/site-tools/.well-known/actions
-```
-
-A minimal manifest looks like this. This JSON is returned by a provider plugin route, usually `/_emdash/api/plugins/<provider>/.well-known/actions`; it is not added to the site `astro.config.mjs`:
-
-```ts
-// In the provider plugin route handler for ".well-known/actions":
-export const manifest = {
-  actions: [
-    {
-      id: "cache.clear",
-      label: "Clear cache",
-      route: "clear-cache",
-    },
-  ],
-};
-```
-
-With that manifest, a matching surface shows a `Clear cache` button. Clicking it calls:
-
-```txt
-POST /_emdash/api/plugins/site-tools/clear-cache
-```
-
-Provider plugins may return plain JSON, or they may use the optional helpers and types from this package in the provider plugin source:
-
-```ts
-// src/index.ts in a provider plugin package
+import { definePlugin, type RouteContext } from "emdash";
 import { defineActionsManifest, type ActionsManifest } from "@bnomei/emdash-actions";
 
-export const manifest: ActionsManifest = defineActionsManifest({
-  actions: [
-    {
-      id: "cache.clear",
-      label: "Clear cache",
-      route: "clear-cache",
-      method: "POST",
-      tone: "info",
-      icon: "bolt",
-      confirm: "Clear the site cache?",
+export function cacheActions() {
+  return definePlugin({
+    id: "cache-actions",
+    version: "0.1.0",
+    routes: {
+      actions: {
+        handler: cacheActionsManifestRoute,
+      },
+      "cache/clear": {
+        handler: clearCacheRoute,
+      },
     },
-  ],
-});
-```
+  });
+}
 
-Using these helpers is optional. A provider can stay completely independent from `emdash-actions` as long as it returns the documented manifest shape.
+async function cacheActionsManifestRoute(): Promise<ActionsManifest> {
+  return defineActionsManifest({
+    actions: [
+      {
+        id: "cache.clear",
+        label: "Clear cache",
+        route: "cache/clear",
+        method: "POST",
+        placement: "dashboard",
+        icon: "bolt",
+        tone: "warning",
+        confirm: "Clear the site cache?",
+      },
+    ],
+  });
+}
 
-## Action Options
+async function clearCacheRoute(ctx: RouteContext) {
+  const serverTime = new Date().toISOString();
+  const clearCount = ((await ctx.kv.get<number>("state:clearCount")) ?? 0) + 1;
 
-Each action in the manifest describes one button:
+  await clearSiteCache(ctx);
+  await ctx.kv.set("state:clearCount", clearCount);
 
-```ts
-type ActionButtonStyle = {
-  color?: string;
-  backgroundColor?: string;
-  borderColor?: string;
-  darkColor?: string;
-  darkBackgroundColor?: string;
-  darkBorderColor?: string;
-  resetStyle?: boolean;
-};
+  ctx.log.info("Cache clear action completed", {
+    clearCount,
+    site: ctx.site.name,
+    serverTime,
+  });
 
-type ActionDescriptor = {
-  id: string;
-  label: string;
-  route: string;
-  method?: "POST" | "PUT" | "PATCH" | "DELETE";
-  pluginId?: string;
-  description?: string;
-  icon?: string;
-  tone?: "default" | "positive" | "warning" | "danger" | "info";
-  confirm?: string;
-  placement?: string;
-  resultMode?: "emdash-action-result-v1" | "emdash-action-accepted-v1" | string;
-  payload?: Record<string, unknown>;
-  contextKey?: string;
-  contextValueKey?: string;
-  disabled?: boolean;
-  cooldownMs?: number;
-  buttonStyle?: {
-    color?: string;
-    backgroundColor?: string;
-    borderColor?: string;
-    darkColor?: string;
-    darkBackgroundColor?: string;
-    darkBorderColor?: string;
-  };
-  feedback?: {
-    progress?: string;
-    success?: string;
-    error?: string;
-    progressStyle?: ActionButtonStyle;
-    successStyle?: ActionButtonStyle;
-    errorStyle?: ActionButtonStyle;
-  };
-  resultEffect?:
-    | "clipboard"
-    | "copy"
-    | "open"
-    | "download"
-    | {
-        type: "clipboard" | "copy" | "open" | "download";
-        target?: "self" | "blank";
-        filename?: string;
-      };
-  pollIntervalMs?: number;
-  pollTimeoutMs?: number;
-};
-```
-
-Required fields:
-
-- `id`: Stable action id, unique inside the provider manifest.
-- `label`: Button label.
-- `route`: Relative plugin API route to call when the button is clicked.
-
-Optional fields:
-
-- `method`: HTTP method. Defaults to `POST`.
-- `pluginId`: Target plugin id. Defaults to the provider plugin. Cross-plugin targets must be explicitly allowed.
-- `description`: Short text shown under the button label.
-- `icon`: Icon hint. Current built-ins include `copy`, `clipboard`, `power`, `warning`, `check`, `x`, `close`, `bolt`, and `lightning`.
-- `tone`: Visual intent for the button and notices.
-- `confirm`: Confirmation prompt shown before the action runs.
-- `placement`: Only show this action for a matching widget placement. Use `global` to show it everywhere.
-- `resultMode`: Result contract hint. Use `emdash-action-result-v1` for immediate results or `emdash-action-accepted-v1` for accepted async work.
-- `payload`: JSON payload sent with the request body for methods that support a body.
-- `contextKey`: Include widget context in the request payload under this key.
-- `contextValueKey`: Dot-path to read from widget context before writing it to `contextKey`. If omitted, the full context object is sent.
-- `disabled`: Render the action as unavailable.
-- `cooldownMs`: Time in milliseconds before temporary button feedback resets. Defaults to `2000`.
-- `buttonStyle`: Optional base button colors. Base colors are not inherited while
-  the button is in the progress phase, so Kumo's readable loading state remains
-  the default.
-- `feedback`: Optional temporary progress, success, and error text/styles.
-  Built-in terminal feedback uses Kumo status tint backgrounds, semantic status
-  text, and status-colored rings so it stays readable across light and dark mode
-  without relying on dynamically emitted Tailwind classes.
-- `resultEffect`: Optional shortcut for string responses. Use it only when the action endpoint is expected to return a URL or copy text directly.
-- `pollIntervalMs`: Default polling interval for async job status routes. Defaults to `1500`.
-- `pollTimeoutMs`: Maximum time to wait for an async job before showing a timeout. Defaults to `120000`.
-
-Routes are validated before use. They must be relative plugin routes such as `clear-cache` or `.well-known/actions`. Absolute URLs, query strings, hashes, encoded paths, traversal segments, and backslashes are rejected.
-
-## Dashboard Widget
-
-Use the dashboard widget when an action is global to the site or provider rather than contextual to one field.
-
-Dashboard actions use the same manifest contract as field actions. A dashboard action can opt into context with `contextKey` and `contextValueKey`. Without host support, dashboard context is intentionally small: `surface: "dashboard"` plus `currentUser` when the auth endpoint responds. It does not contain entry data, because the dashboard is not tied to one content item.
-
-Screenshot pending. Capture this from a real EmDash dashboard after wiring the widget into a host project:
-
-```txt
-docs/actions-dashboard.png
-```
-
-Dashboard widget options go into the `actionsPlugin()` call in `astro.config.mjs`:
-
-```ts
-// astro.config.mjs
-actionsPlugin({
-  title: "Actions",
-  size: "half",
-  placement: "dashboard",
-  providers: [
-    {
-      pluginId: "site-tools",
-      label: "Site tools",
-      manifestRoute: ".well-known/actions",
-      allowedTargetPluginIds: [],
+  return {
+    ok: true,
+    status: 200,
+    severity: "success",
+    message: `Cache cleared on the server at ${serverTime}.`,
+    toast: {
+      type: "success",
+      title: "Cache cleared",
+      message: `${ctx.site.name} cache has been cleared ${clearCount} time(s).`,
     },
-  ],
-});
+  };
+}
+
+async function clearSiteCache(ctx: RouteContext) {
+  // Replace this with your cache provider, CDN, build, or deployment logic.
+  await ctx.kv.set("state:lastClearedAt", new Date().toISOString());
+}
 ```
 
-Available options:
+### 2. Register The UI And Provider
 
-- `title`: Dashboard widget title. Defaults to `Actions`.
-- `size`: Widget size, either `full`, `half`, or `third`. Defaults to `half`.
-- `placement`: Which action placement this widget should show. Defaults to `dashboard`. Set to `null` to show all actions.
-- `providers`: Action provider plugins to load.
-- `entrypoint`: Package entrypoint for the native descriptor. Defaults to `@bnomei/emdash-actions`.
-- `adminEntry`: Admin UI entrypoint. Defaults to `@bnomei/emdash-actions/admin`.
-
-Provider options:
-
-- `pluginId`: Provider plugin id.
-- `label`: Human-readable provider label.
-- `manifestRoute`: Provider route that returns the actions manifest. Defaults to `.well-known/actions`.
-- `allowedTargetPluginIds`: Plugin ids this provider may target with action descriptors.
-
-## Example Provider
-
-The first example provider is `@bnomei/emdash-action-maintenance`. It exposes maintenance mode actions that the dashboard can render as buttons.
-
-Install both packages:
-
-```sh
-vp install @bnomei/emdash-actions @bnomei/emdash-action-maintenance
-```
-
-Register the actions UI and the maintenance provider in the `emdash({ plugins: [...] })` list in `astro.config.mjs`:
+Add `actionsPlugin()` and the provider plugin to the EmDash plugin list in
+`astro.config.mjs`:
 
 ```ts
-// astro.config.mjs
 import { defineConfig } from "astro/config";
 import emdash from "emdash/astro";
 import { actionsPlugin } from "@bnomei/emdash-actions";
-import {
-  PLUGIN_ID as MAINTENANCE_PLUGIN_ID,
-  actionMaintenance,
-} from "@bnomei/emdash-action-maintenance";
+import { cacheActions } from "./src/emdash/cache-actions";
+
+const cacheActionsProvider = {
+  pluginId: "cache-actions",
+  label: "Cache actions",
+  manifestRoute: "actions",
+};
 
 export default defineConfig({
   integrations: [
     emdash({
       plugins: [
         actionsPlugin({
-          providers: [
-            {
-              pluginId: MAINTENANCE_PLUGIN_ID,
-              label: "Maintenance",
-            },
-          ],
+          providers: [cacheActionsProvider],
         }),
-        actionMaintenance({
-          defaultMessage: "This site is temporarily unavailable. Please check back soon.",
-        }),
+        cacheActions(),
       ],
     }),
   ],
 });
 ```
 
-The maintenance provider can expose a single toggle button for maintenance mode. The provider owns the API route and persisted state; `emdash-actions` renders the button, calls the configured endpoint, and can update that clicked button from the successful result.
+### 3. Click The Button
 
-## Action Responses
+Open the EmDash dashboard. The `Actions` widget loads:
 
-Action responses can update the clicked button inline, patch the stable action descriptor, trigger browser effects, and show Kumo toasts. The response body may be plain JSON, or the value wrapped by EmDash `apiSuccess()`.
-
-Temporary feedback is shown inside the clicked button. During progress or terminal results, `message` wins first, then object-style `notification.message`, then configured `feedback.progress`, `feedback.success`, or `feedback.error`, then legacy `label`, then the default fallback. Temporary feedback resets after `cooldownMs`.
-
-Terminal responses can override the temporary button colors with `color`,
-`backgroundColor`, `borderColor`, and their `dark*` variants. Set
-`resetStyle: true` to skip built-in feedback colors for that response.
-
-Use `action` for persistent next-state button changes. This is the contract to use for toggles such as maintenance mode:
-
-```ts
-// Response body from POST /_emdash/api/plugins/maintenance/toggle
-{
-  ok: true,
-  message: "Maintenance mode enabled.",
-  action: {
-    label: "Disable maintenance mode",
-    tone: "danger",
-  },
-}
+```txt
+GET /_emdash/api/plugins/cache-actions/actions
 ```
 
-After the next click, the provider can toggle back:
+It renders `Clear cache`. Clicking the button calls:
 
-```ts
-{
-  ok: true,
-  message: "Maintenance mode disabled.",
-  action: {
-    label: "Enable maintenance mode",
-    tone: "positive",
-  },
-}
+```txt
+POST /_emdash/api/plugins/cache-actions/cache/clear
 ```
 
-The stable `action.label` is merged into the clicked action and is not cleared by `cooldownMs`. A full dashboard reload still depends on the provider manifest reading current persisted state and returning the correct label. For maintenance mode, the labels should be exactly `Enable maintenance mode` and `Disable maintenance mode`.
+The provider route runs on the server, uses EmDash `ctx`, and returns the inline
+button feedback plus toast.
 
-Supported stable patch fields are:
+> [!NOTE]
+> This quick start uses a dashboard action because it shows the whole provider
+> loop without needing collection schema changes. Field buttons use the same
+> provider route model.
 
-```ts
-type ActionResultActionPatch = {
-  label?: string;
-  icon?: string | null;
-  tone?: "default" | "positive" | "warning" | "danger" | "info" | null;
-  description?: string | null;
-  disabled?: boolean;
-  confirm?: string | null;
-  payload?: Record<string, unknown> | null;
-};
-```
+## What To Use
 
-Use `effects` for browser actions after a terminal successful result:
+| Goal                                                 | Start here                                                           |
+| ---------------------------------------------------- | -------------------------------------------------------------------- |
+| Copy a value without backend code                    | [Clipboard Field Button](./examples/clipboard-field-button.md)       |
+| Call one backend route from a field                  | [Direct Route Field Action](./examples/direct-route-field-action.md) |
+| Let a provider own labels, icon, route, and feedback | [Manifest Field Action](./examples/manifest-field-action.md)         |
+| Add a dashboard action                               | [Dashboard Action](./examples/dashboard-action.md)                   |
+| Return clipboard, open, download, or reload effects  | [Response effect examples](./examples/README.md)                     |
+| Show a Kumo toast                                    | [Toast Notification](./examples/toast-notification.md)               |
+| Patch a clicked button after success                 | [Action Patch](./examples/action-patch.md)                           |
+| Poll long-running work                               | [Async Job](./examples/async-job.md)                                 |
+| Run the provider in a sandbox                        | [Sandboxed Provider](./examples/sandboxed-provider.md)               |
+
+The full recipe index is in [examples](./examples/README.md).
+
+## Core Concepts
+
+### Surfaces
+
+- `actions:button`: field widget for content forms. It supports `clipboard`
+  mode for browser-native copying and `run` mode for provider-backed actions.
+- `Actions`: dashboard widget for provider/global actions. It reads configured
+  provider manifests and renders matching action buttons.
+
+### Providers And Manifests
+
+A provider manifest describes buttons:
 
 ```ts
 {
-  ok: true,
-  message: "Archive ready.",
-  effects: {
-    clipboard: { text: "https://example.com/archive.zip" },
-    open: { url: "https://example.com/archive.zip", target: "blank" },
-    download: { route: "exports/latest.zip", filename: "latest.zip" },
-    reload: { delayMs: 1500 },
-  },
+  actions: [
+    {
+      id: "cache.clear",
+      label: "Clear cache",
+      route: "cache/clear",
+      method: "POST",
+      placement: "dashboard",
+    },
+  ],
 }
 ```
 
-Top-level aliases are also accepted: `clipboard`, `open`, `download`, and `reload`. `open` and URL downloads accept relative, `http`, or `https` URLs. Protected provider downloads can use `download: { route }`, which fetches through the action target plugin with EmDash auth headers.
+`emdash-actions` loads the manifest from a provider route such as:
 
-For simple provider routes, an action can declare a primitive string fast pass:
-
-```ts
-{
-  id: "entry.copyPreviewUrl",
-  label: "Copy preview URL",
-  route: "preview-url",
-  resultEffect: "clipboard",
-}
+```txt
+GET /_emdash/api/plugins/cache-actions/actions
 ```
 
-If that route returns only a string, the string is copied. The same works for `resultEffect: { type: "open", target: "blank" }` and `resultEffect: { type: "download", filename: "export.zip" }`.
+Clicking the action calls the manifest route target:
 
-Use `toast` when the result should show a Kumo toast instead of, or in addition to, inline button feedback:
-
-```ts
-{
-  ok: true,
-  action: { label: "Disable maintenance mode" },
-  toast: {
-    type: "success",
-    title: "Maintenance mode enabled",
-    message: "Visitors will see the maintenance page.",
-  },
-}
+```txt
+POST /_emdash/api/plugins/cache-actions/cache/clear
 ```
 
-`toast` accepts one toast, an array of toasts, or `false`. Janitor-style `notification: [{ type, title, message }]` arrays are treated as toasts. Object-style `notification: { type, message }` remains inline feedback compatibility.
+Field buttons can also skip the manifest and call a direct route from field
+options. Dashboard discovery uses `actionsPlugin({ providers })`.
 
-## Async Jobs
+> [!IMPORTANT]
+> Field JSON belongs in the target collection schema's `fields` array. It does
+> not go inside `actionsPlugin()` or `astro.config.mjs`.
 
-Action responses update the clicked button inline. While work is active, the button stays loading and uses the latest response message as temporary text. Terminal success and error messages reset after `cooldownMs` unless the result patches the stable action descriptor.
+> [!WARNING]
+> Provider routes must be relative plugin routes such as `cache/clear` or
+> `.well-known/actions`. Absolute URLs, query strings, hashes, encoded paths,
+> traversal segments, spaces, and backslashes are rejected.
 
-For Cloudflare/serverless actions that start longer work, return an accepted result with a `statusRoute`. The button surface keeps the action loading, polls that route, and updates the button feedback until the job reaches a terminal state.
+### Action Responses
 
-Initial action response from the provider route that starts the job:
+Provider routes return JSON that controls the clicked button and optional browser
+effects:
 
-```ts
-// Response body from POST /_emdash/api/plugins/<provider>/<route>
-{
-  ok: true,
-  status: 202,
-  jobId: "backup-01",
-  jobStatus: "accepted",
-  statusRoute: "jobs/backup-01",
-  message: "Backup accepted.",
-  pollAfterMs: 1500,
-}
-```
+- `message`, `severity`, `color`, `backgroundColor`, and `borderColor` drive
+  temporary inline feedback.
+- `action` patches the stable clicked button descriptor, useful for toggles.
+- `effects` or top-level aliases can run `clipboard`, `open`, `download`, and
+  `reload`.
+- `toast` shows a Kumo toast.
+- `status: 202`, `jobStatus`, and `statusRoute` start async polling.
+- `resultValueKey` on a field button can write a returned value back into the
+  field.
 
-Status route response while the job is still active:
+See the focused response recipes for complete payloads:
+[Clipboard Effect](./examples/clipboard-effect.md),
+[Open Effect](./examples/open-effect.md),
+[Download Effect](./examples/download-effect.md),
+[Toast Notification](./examples/toast-notification.md),
+[Feedback And Colors](./examples/feedback-and-colors.md),
+[Action Patch](./examples/action-patch.md), and
+[Async Job](./examples/async-job.md).
 
-```ts
-// Response body from GET /_emdash/api/plugins/<provider>/jobs/backup-01
-{
-  ok: true,
-  status: 200,
-  jobId: "backup-01",
-  jobStatus: "running",
-  statusRoute: "jobs/backup-01",
-  progress: 0.42,
-  message: "Writing archive.",
-}
-```
+### Entry Context
 
-Terminal status route response:
+Field buttons can include inferred entry context in the action payload with
+`contextKey` and `contextValueKey`. Without a host-provided field-widget context,
+the plugin infers what it can from the admin route and saved EmDash APIs:
+collection, entry id, new/edit state, field name, current field value, saved
+entry data, and current user when available.
 
-```ts
-// Response body from GET /_emdash/api/plugins/<provider>/jobs/backup-01
-{
-  ok: true,
-  status: 200,
-  jobId: "backup-01",
-  jobStatus: "succeeded",
-  progress: 1,
-  message: "Backup complete.",
-}
-```
+> [!WARNING]
+> Entry context is best-effort. It cannot infer live unsaved values from sibling
+> fields. Pass the current field value with `valueKey`, use static `payload`, or
+> have the provider read the latest saved entry server-side.
 
-Supported job statuses:
+### Provider Formats
 
-- `accepted`, `queued`, `running`: The widget keeps polling.
-- `succeeded`: The widget stops polling and shows temporary success feedback.
-- `failed`, `cancelled`: The widget stops polling and shows temporary error feedback.
+`emdash-actions` is a native EmDash UI plugin and belongs in `plugins: []`.
+Provider plugins can use different formats:
 
-`statusRoute` must be a relative plugin route under the action's target plugin. The same route validation rules apply as for action routes.
+- Native providers use `definePlugin()` from `emdash` and receive one merged
+  `RouteContext` argument.
+- Standard trusted providers can expose the same manifest and routes in
+  `plugins: []`.
+- Standard sandboxed providers export a `SandboxedPlugin` route map, run in
+  `sandboxed: []`, and receive `(routeCtx, ctx)`.
 
-If a provider returns `status: 202` or `resultMode: "emdash-action-accepted-v1"` without a `statusRoute`, the widget can only show the accepted result. It cannot infer queued, running, failed, or completed state without a provider-owned status endpoint.
+See [Sandboxed Provider](./examples/sandboxed-provider.md) for the sandboxed
+shape and caveats.
+
+## Configuration At A Glance
+
+### `actionsPlugin()` Options
+
+- `providers`: provider plugins the dashboard widget should discover.
+- `placement`: dashboard manifest placement to render. Defaults to `dashboard`.
+  Set to `null` to show all placements.
+- `title`: dashboard widget title. Defaults to `Actions`.
+- `size`: dashboard widget size, `full`, `half`, or `third`.
+- `entrypoint` and `adminEntry`: advanced descriptor overrides.
+
+### Provider Options
+
+- `pluginId`: provider plugin id.
+- `label`: human-readable provider label.
+- `manifestRoute`: provider route that returns the manifest. Defaults to
+  `.well-known/actions`.
+- `allowedTargetPluginIds`: cross-plugin route targets this provider may call.
+
+### Field Button Options
+
+The most common field options are:
+
+- `mode`: `clipboard` or `run`.
+- `provider` or `pluginId`: provider plugin id.
+- `route`: direct provider route.
+- `action`: provider manifest action id.
+- `label`, `description`, `icon`, `tone`, `confirm`: button UI.
+- `payload`: static JSON body values.
+- `valueKey`: include the current field value in the request body.
+- `contextKey` and `contextValueKey`: include inferred context.
+- `resultValueKey`: write a returned result value back into the field.
+- `clipboardText`, `clipboardValueKey`, `clipboardContextValueKey`,
+  `clipboardSuccess`: clipboard mode.
+- `feedback`, `buttonStyle`, `cooldownMs`: temporary feedback and styling.
+- `resultEffect`, `pollIntervalMs`, `pollTimeoutMs`: response shortcuts and
+  async polling.
+
+The exported TypeScript contracts live in [src/types.ts](./src/types.ts).
+
+## Special Cases
+
+> [!NOTE]
+> Clipboard mode uses `navigator.clipboard.writeText()` in the browser. It does
+> not call the backend, and browsers require HTTPS or localhost plus clipboard
+> permission.
+
+> [!CAUTION]
+> Use `confirm` for destructive dashboard actions such as cache clearing,
+> maintenance toggles, deploys, exports, or purge operations.
+
+- Direct field routes can specify `options.provider` and `options.route` in the
+  field JSON. They do not need to be listed in `actionsPlugin({ providers })`
+  unless the dashboard should discover them too.
+- Cross-plugin target routes require `allowedTargetPluginIds`; otherwise a
+  provider manifest can only target its own plugin id.
+- `DELETE` actions do not receive a JSON body, so payload, value, and context
+  keys are useful with `POST`, `PUT`, and `PATCH`.
+- Protected downloads can use `effects.download.route` to fetch through the
+  action target plugin with EmDash auth headers. Sandboxed providers should
+  prefer public or signed URLs for binary downloads, or delegate streaming to a
+  trusted native route.
+- Async jobs need a provider-owned `statusRoute`. Without one, the widget can
+  show that work was accepted but cannot infer queued, running, failed, or
+  completed state.
 
 ## Development
 
