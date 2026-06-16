@@ -1575,7 +1575,8 @@ function buttonStyle(
   feedback: ButtonFeedback,
   options?: Pick<ActionButtonFieldOptions, "buttonStyle">,
 ) {
-  const base = options?.buttonStyle ?? action?.buttonStyle;
+  const base =
+    feedback?.phase === "progress" ? undefined : (options?.buttonStyle ?? action?.buttonStyle);
   const style = mergeButtonStyle(base, feedback?.style);
   return style && Object.keys(style).length > 0 ? style : undefined;
 }
@@ -1586,11 +1587,26 @@ function mergeButtonStyle(
 ) {
   const source = override?.resetStyle ? undefined : base;
   const style: CSSProperties = {};
-  if (source?.color) style.color = source.color;
-  if (source?.backgroundColor) style.backgroundColor = source.backgroundColor;
-  if (override?.color) style.color = override.color;
-  if (override?.backgroundColor) style.backgroundColor = override.backgroundColor;
+  const sourceColor = themedStyleValue(source?.color, source?.darkColor);
+  const sourceBackgroundColor = themedStyleValue(
+    source?.backgroundColor,
+    source?.darkBackgroundColor,
+  );
+  const overrideColor = themedStyleValue(override?.color, override?.darkColor);
+  const overrideBackgroundColor = themedStyleValue(
+    override?.backgroundColor,
+    override?.darkBackgroundColor,
+  );
+  if (sourceColor) style.color = sourceColor;
+  if (sourceBackgroundColor) style.backgroundColor = sourceBackgroundColor;
+  if (overrideColor) style.color = overrideColor;
+  if (overrideBackgroundColor) style.backgroundColor = overrideBackgroundColor;
   return style;
+}
+
+function themedStyleValue(light: string | undefined, dark: string | undefined) {
+  if (!light) return undefined;
+  return dark ? `light-dark(${light}, ${dark})` : light;
 }
 
 function mergeActionButtonStyle(
@@ -1941,9 +1957,16 @@ function readOptionalButtonStyle(value: unknown, field: string): ActionButtonSty
   const style: ActionButtonStyle = {};
   const color = readOptionalString(record.color, `${field}.color`);
   const backgroundColor = readOptionalString(record.backgroundColor, `${field}.backgroundColor`);
+  const darkColor = readOptionalString(record.darkColor, `${field}.darkColor`);
+  const darkBackgroundColor = readOptionalString(
+    record.darkBackgroundColor,
+    `${field}.darkBackgroundColor`,
+  );
   const resetStyle = readOptionalBoolean(record.resetStyle, `${field}.resetStyle`);
   if (color) style.color = color;
   if (backgroundColor) style.backgroundColor = backgroundColor;
+  if (darkColor) style.darkColor = darkColor;
+  if (darkBackgroundColor) style.darkBackgroundColor = darkBackgroundColor;
   if (resetStyle !== undefined) style.resetStyle = resetStyle;
   return Object.keys(style).length > 0 ? style : undefined;
 }

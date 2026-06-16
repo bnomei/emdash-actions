@@ -172,7 +172,9 @@ Field button options:
 - `manifestRoute`: Provider manifest route. Defaults to `.well-known/actions`.
 - `allowedTargetPluginIds`: Cross-plugin targets allowed when resolving manifest actions.
 - `cooldownMs`: Time in milliseconds before temporary button feedback resets. Defaults to `2000`.
-- `buttonStyle`: Optional button colors, for example `{ color, backgroundColor }`.
+- `buttonStyle`: Optional base button colors, for example `{ color, backgroundColor }`.
+  Add `darkColor` and `darkBackgroundColor` when the custom colors need different
+  light and dark mode values.
 - `feedback`: Optional temporary labels and styles for `progress`, `success`, and `error` phases.
 - `resultEffect`: Optional primitive response shortcut. If the action endpoint returns a string, this can turn it into a `clipboard`, `open`, or `download` effect.
 - `pollIntervalMs` and `pollTimeoutMs`: Async job polling controls.
@@ -277,6 +279,14 @@ Using these helpers is optional. A provider can stay completely independent from
 Each action in the manifest describes one button:
 
 ```ts
+type ActionButtonStyle = {
+  color?: string;
+  backgroundColor?: string;
+  darkColor?: string;
+  darkBackgroundColor?: string;
+  resetStyle?: boolean;
+};
+
 type ActionDescriptor = {
   id: string;
   label: string;
@@ -297,14 +307,16 @@ type ActionDescriptor = {
   buttonStyle?: {
     color?: string;
     backgroundColor?: string;
+    darkColor?: string;
+    darkBackgroundColor?: string;
   };
   feedback?: {
     progress?: string;
     success?: string;
     error?: string;
-    progressStyle?: { color?: string; backgroundColor?: string; resetStyle?: boolean };
-    successStyle?: { color?: string; backgroundColor?: string; resetStyle?: boolean };
-    errorStyle?: { color?: string; backgroundColor?: string; resetStyle?: boolean };
+    progressStyle?: ActionButtonStyle;
+    successStyle?: ActionButtonStyle;
+    errorStyle?: ActionButtonStyle;
   };
   resultEffect?:
     | "clipboard"
@@ -342,7 +354,9 @@ Optional fields:
 - `contextValueKey`: Dot-path to read from widget context before writing it to `contextKey`. If omitted, the full context object is sent.
 - `disabled`: Render the action as unavailable.
 - `cooldownMs`: Time in milliseconds before temporary button feedback resets. Defaults to `2000`.
-- `buttonStyle`: Optional base button colors.
+- `buttonStyle`: Optional base button colors. Base colors are not inherited while
+  the button is in the progress phase, so Kumo's readable loading state remains
+  the default.
 - `feedback`: Optional temporary progress, success, and error text/styles.
 - `resultEffect`: Optional shortcut for string responses. Use it only when the action endpoint is expected to return a URL or copy text directly.
 - `pollIntervalMs`: Default polling interval for async job status routes. Defaults to `1500`.

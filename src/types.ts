@@ -55,6 +55,8 @@ export interface ActionButtonContext {
 export interface ActionButtonStyle {
   color?: string;
   backgroundColor?: string;
+  darkColor?: string;
+  darkBackgroundColor?: string;
   resetStyle?: boolean;
 }
 

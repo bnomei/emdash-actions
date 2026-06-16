@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 - 2026-06-16
+
+- Fixed progress feedback styling so base button colors no longer override Kumo's readable loading and disabled defaults.
+- Added `darkColor` and `darkBackgroundColor` button style fields for theme-aware custom button colors.
+
 ## 0.2.1 - 2026-06-16
 
 - Fixed progress feedback button styling so running actions defer to Kumo's readable loading and disabled states while terminal success and error feedback keep explicit green and red flashes.
