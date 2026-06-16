@@ -99,6 +99,7 @@ type CurrentUserContext = {
 type NoticeTone = ActionTone | "error" | "success";
 
 type ButtonFeedback = {
+  phase: "progress" | "success" | "error";
   tone: NoticeTone;
   message: string;
   style?: ActionButtonStyle;
@@ -323,7 +324,11 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         );
       }
     } catch (error) {
-      setActionFeedback(action, { tone: "error", message: errorMessage(error) }, true);
+      setActionFeedback(
+        action,
+        { phase: "error", tone: "error", message: errorMessage(error) },
+        true,
+      );
     } finally {
       setBusyKey(null);
     }
@@ -565,7 +570,11 @@ function ActionButtonFieldContent({
         );
       }
     } catch (runError) {
-      setFieldFeedback({ tone: "error", message: errorMessage(runError) }, true, action);
+      setFieldFeedback(
+        { phase: "error", tone: "error", message: errorMessage(runError) },
+        true,
+        action,
+      );
     } finally {
       setBusy(false);
     }
@@ -585,6 +594,7 @@ function ActionButtonFieldContent({
       await writeClipboardText(text);
       setFieldFeedback(
         {
+          phase: "success",
           tone: "success",
           message: optionalFieldString(options?.clipboardSuccess) ?? "Copied to clipboard.",
         },
@@ -592,7 +602,11 @@ function ActionButtonFieldContent({
         options ?? null,
       );
     } catch (copyError) {
-      setFieldFeedback({ tone: "error", message: errorMessage(copyError) }, true, options ?? null);
+      setFieldFeedback(
+        { phase: "error", tone: "error", message: errorMessage(copyError) },
+        true,
+        options ?? null,
+      );
     } finally {
       setBusy(false);
     }
@@ -1589,6 +1603,7 @@ function mergeActionButtonStyle(
 function buttonClassName(feedback: ButtonFeedback) {
   if (!feedback || feedback.style?.backgroundColor || feedback.style?.color) return undefined;
   if (feedback.className) return feedback.className;
+  if (feedback.phase === "progress") return undefined;
   if (feedback.tone === "danger" || feedback.tone === "error") {
     return "!border-kumo-danger !bg-kumo-danger !text-white";
   }
@@ -1661,6 +1676,7 @@ function feedbackFromResult(
 ): ButtonFeedback {
   const phase = resultPhase(result);
   return {
+    phase,
     tone: resultTone(result),
     message: resultMessage(action, result, phase, fallbackMessage),
     style: resultFeedbackStyle(action, result, phase),
@@ -1669,6 +1685,7 @@ function feedbackFromResult(
 
 function progressFeedbackForAction(action: ActionDescriptor): ButtonFeedback {
   return {
+    phase: "progress",
     tone: "info",
     message: action.feedback?.progress ?? `${action.label} is running.`,
     style: action.feedback?.progressStyle,

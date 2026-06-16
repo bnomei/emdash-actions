@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 - 2026-06-16
+
+- Fixed progress feedback button styling so running actions defer to Kumo's readable loading and disabled states while terminal success and error feedback keep explicit green and red flashes.
+
 ## 0.2.0 - 2026-06-16
 
 - Added stateful action result updates through `result.action`, so a clicked action can update its stable label, icon, tone, description, disabled state, confirmation prompt, or payload after a successful terminal result.
