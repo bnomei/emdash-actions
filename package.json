@@ -1,6 +1,6 @@
 {
   "name": "@bnomei/emdash-actions",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Native action surface for EmDash provider plugins.",
   "keywords": [
     "astro",
