@@ -55,8 +55,10 @@ export interface ActionButtonContext {
 export interface ActionButtonStyle {
   color?: string;
   backgroundColor?: string;
+  borderColor?: string;
   darkColor?: string;
   darkBackgroundColor?: string;
+  darkBorderColor?: string;
   resetStyle?: boolean;
 }
 
@@ -189,6 +191,10 @@ export interface ActionRunResult {
   icon?: string;
   color?: string;
   backgroundColor?: string;
+  borderColor?: string;
+  darkColor?: string;
+  darkBackgroundColor?: string;
+  darkBorderColor?: string;
   resetStyle?: boolean;
   action?: ActionResultActionPatch;
   effects?: ActionResultEffects;

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 - 2026-06-16
+
+- Fixed terminal feedback button colors so success, error, warning, and info states no longer rely on dynamically emitted important Tailwind classes.
+- Switched default terminal feedback to readable Kumo status tint backgrounds with semantic status text and status-colored rings in light and dark mode.
+- Added `borderColor` and `darkBorderColor` button style fields for custom feedback borders.
+
 ## 0.2.2 - 2026-06-16
 
 - Fixed progress feedback styling so base button colors no longer override Kumo's readable loading and disabled defaults.

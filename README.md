@@ -173,8 +173,9 @@ Field button options:
 - `allowedTargetPluginIds`: Cross-plugin targets allowed when resolving manifest actions.
 - `cooldownMs`: Time in milliseconds before temporary button feedback resets. Defaults to `2000`.
 - `buttonStyle`: Optional base button colors, for example `{ color, backgroundColor }`.
-  Add `darkColor` and `darkBackgroundColor` when the custom colors need different
-  light and dark mode values.
+  Add `borderColor` for a matching feedback ring. Add `darkColor`,
+  `darkBackgroundColor`, and `darkBorderColor` when the custom colors need
+  different light and dark mode values.
 - `feedback`: Optional temporary labels and styles for `progress`, `success`, and `error` phases.
 - `resultEffect`: Optional primitive response shortcut. If the action endpoint returns a string, this can turn it into a `clipboard`, `open`, or `download` effect.
 - `pollIntervalMs` and `pollTimeoutMs`: Async job polling controls.
@@ -282,8 +283,10 @@ Each action in the manifest describes one button:
 type ActionButtonStyle = {
   color?: string;
   backgroundColor?: string;
+  borderColor?: string;
   darkColor?: string;
   darkBackgroundColor?: string;
+  darkBorderColor?: string;
   resetStyle?: boolean;
 };
 
@@ -307,8 +310,10 @@ type ActionDescriptor = {
   buttonStyle?: {
     color?: string;
     backgroundColor?: string;
+    borderColor?: string;
     darkColor?: string;
     darkBackgroundColor?: string;
+    darkBorderColor?: string;
   };
   feedback?: {
     progress?: string;
@@ -358,6 +363,9 @@ Optional fields:
   the button is in the progress phase, so Kumo's readable loading state remains
   the default.
 - `feedback`: Optional temporary progress, success, and error text/styles.
+  Built-in terminal feedback uses Kumo status tint backgrounds, semantic status
+  text, and status-colored rings so it stays readable across light and dark mode
+  without relying on dynamically emitted Tailwind classes.
 - `resultEffect`: Optional shortcut for string responses. Use it only when the action endpoint is expected to return a URL or copy text directly.
 - `pollIntervalMs`: Default polling interval for async job status routes. Defaults to `1500`.
 - `pollTimeoutMs`: Maximum time to wait for an async job before showing a timeout. Defaults to `120000`.
@@ -461,6 +469,10 @@ The maintenance provider can expose a single toggle button for maintenance mode.
 Action responses can update the clicked button inline, patch the stable action descriptor, trigger browser effects, and show Kumo toasts. The response body may be plain JSON, or the value wrapped by EmDash `apiSuccess()`.
 
 Temporary feedback is shown inside the clicked button. During progress or terminal results, `message` wins first, then object-style `notification.message`, then configured `feedback.progress`, `feedback.success`, or `feedback.error`, then legacy `label`, then the default fallback. Temporary feedback resets after `cooldownMs`.
+
+Terminal responses can override the temporary button colors with `color`,
+`backgroundColor`, `borderColor`, and their `dark*` variants. Set
+`resetStyle: true` to skip built-in feedback colors for that response.
 
 Use `action` for persistent next-state button changes. This is the contract to use for toggles such as maintenance mode:
 

@@ -389,7 +389,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
                       style={buttonStyle(action, feedback)}
                       title={feedback?.message}
                       type="button"
-                      variant={buttonVariant(feedback?.tone ?? action.tone)}
+                      variant={buttonVariant(feedback?.tone ?? action.tone, feedback)}
                     >
                       {feedback?.message ?? action.label}
                     </Button>
@@ -642,6 +642,7 @@ function ActionButtonFieldContent({
         type="button"
         variant={buttonVariant(
           feedback?.tone ?? action?.tone ?? readOptionalFieldTone(options?.tone),
+          feedback,
         )}
       >
         {feedback?.message ?? buttonLabel}
@@ -1565,7 +1566,11 @@ function matchesPlacement(action: ActionDescriptor, placement: string | null) {
   );
 }
 
-function buttonVariant(tone: NoticeTone | undefined) {
+function buttonVariant(tone: NoticeTone | undefined, feedback?: ButtonFeedback) {
+  if (feedback?.style?.resetStyle === true) return "secondary";
+  if (feedback?.className || feedback?.style || (feedback && feedback.phase !== "progress")) {
+    return "outline";
+  }
   if (tone === "danger" || tone === "error") return "destructive";
   return "secondary";
 }
@@ -1577,7 +1582,7 @@ function buttonStyle(
 ) {
   const base =
     feedback?.phase === "progress" ? undefined : (options?.buttonStyle ?? action?.buttonStyle);
-  const style = mergeButtonStyle(base, feedback?.style);
+  const style = mergeButtonStyle(base, feedback?.style ?? defaultButtonFeedbackStyle(feedback));
   return style && Object.keys(style).length > 0 ? style : undefined;
 }
 
@@ -1586,21 +1591,31 @@ function mergeButtonStyle(
   override: ActionButtonStyle | undefined,
 ) {
   const source = override?.resetStyle ? undefined : base;
-  const style: CSSProperties = {};
+  const style: CSSProperties & { "--tw-ring-color"?: string } = {};
   const sourceColor = themedStyleValue(source?.color, source?.darkColor);
   const sourceBackgroundColor = themedStyleValue(
     source?.backgroundColor,
     source?.darkBackgroundColor,
   );
+  const sourceBorderColor = themedStyleValue(source?.borderColor, source?.darkBorderColor);
   const overrideColor = themedStyleValue(override?.color, override?.darkColor);
   const overrideBackgroundColor = themedStyleValue(
     override?.backgroundColor,
     override?.darkBackgroundColor,
   );
+  const overrideBorderColor = themedStyleValue(override?.borderColor, override?.darkBorderColor);
   if (sourceColor) style.color = sourceColor;
   if (sourceBackgroundColor) style.backgroundColor = sourceBackgroundColor;
+  if (sourceBorderColor) {
+    style.borderColor = sourceBorderColor;
+    style["--tw-ring-color"] = sourceBorderColor;
+  }
   if (overrideColor) style.color = overrideColor;
   if (overrideBackgroundColor) style.backgroundColor = overrideBackgroundColor;
+  if (overrideBorderColor) {
+    style.borderColor = overrideBorderColor;
+    style["--tw-ring-color"] = overrideBorderColor;
+  }
   return style;
 }
 
@@ -1617,22 +1632,28 @@ function mergeActionButtonStyle(
 }
 
 function buttonClassName(feedback: ButtonFeedback) {
-  if (!feedback || feedback.style?.backgroundColor || feedback.style?.color) return undefined;
-  if (feedback.className) return feedback.className;
-  if (feedback.phase === "progress") return undefined;
-  if (feedback.tone === "danger" || feedback.tone === "error") {
-    return "!border-kumo-danger !bg-kumo-danger !text-white";
-  }
-  if (feedback.tone === "positive" || feedback.tone === "success") {
-    return "!border-kumo-success !bg-kumo-success !text-white";
-  }
-  if (feedback.tone === "warning") {
-    return "!border-kumo-warning !bg-kumo-warning !text-white";
-  }
-  if (feedback.tone === "info") {
-    return "!border-kumo-info !bg-kumo-info !text-white";
-  }
-  return undefined;
+  return feedback?.className;
+}
+
+function defaultButtonFeedbackStyle(feedback: ButtonFeedback): ActionButtonStyle | undefined {
+  if (!feedback || feedback.phase === "progress" || feedback.className) return undefined;
+
+  const token = feedbackToneToken(feedback.tone);
+  if (!token) return undefined;
+
+  return {
+    color: `var(--text-color-kumo-${token})`,
+    backgroundColor: `var(--color-kumo-${token}-tint)`,
+    borderColor: `var(--color-kumo-${token})`,
+  };
+}
+
+function feedbackToneToken(tone: NoticeTone | undefined) {
+  if (tone === "danger" || tone === "error") return "danger";
+  if (tone === "positive" || tone === "success") return "success";
+  if (tone === "warning") return "warning";
+  if (tone === "info") return "info";
+  return null;
 }
 
 function actionIcon(action: ActionDescriptor) {
@@ -1763,8 +1784,16 @@ function resultFeedbackStyle(
   const override: ActionButtonStyle = {};
   const color = cleanOptionalString(result.color);
   const backgroundColor = cleanOptionalString(result.backgroundColor);
+  const borderColor = cleanOptionalString(result.borderColor);
+  const darkColor = cleanOptionalString(result.darkColor);
+  const darkBackgroundColor = cleanOptionalString(result.darkBackgroundColor);
+  const darkBorderColor = cleanOptionalString(result.darkBorderColor);
   if (color) override.color = color;
   if (backgroundColor) override.backgroundColor = backgroundColor;
+  if (borderColor) override.borderColor = borderColor;
+  if (darkColor) override.darkColor = darkColor;
+  if (darkBackgroundColor) override.darkBackgroundColor = darkBackgroundColor;
+  if (darkBorderColor) override.darkBorderColor = darkBorderColor;
   if (result.resetStyle === true) override.resetStyle = true;
 
   return Object.keys(override).length > 0
@@ -1957,16 +1986,20 @@ function readOptionalButtonStyle(value: unknown, field: string): ActionButtonSty
   const style: ActionButtonStyle = {};
   const color = readOptionalString(record.color, `${field}.color`);
   const backgroundColor = readOptionalString(record.backgroundColor, `${field}.backgroundColor`);
+  const borderColor = readOptionalString(record.borderColor, `${field}.borderColor`);
   const darkColor = readOptionalString(record.darkColor, `${field}.darkColor`);
   const darkBackgroundColor = readOptionalString(
     record.darkBackgroundColor,
     `${field}.darkBackgroundColor`,
   );
+  const darkBorderColor = readOptionalString(record.darkBorderColor, `${field}.darkBorderColor`);
   const resetStyle = readOptionalBoolean(record.resetStyle, `${field}.resetStyle`);
   if (color) style.color = color;
   if (backgroundColor) style.backgroundColor = backgroundColor;
+  if (borderColor) style.borderColor = borderColor;
   if (darkColor) style.darkColor = darkColor;
   if (darkBackgroundColor) style.darkBackgroundColor = darkBackgroundColor;
+  if (darkBorderColor) style.darkBorderColor = darkBorderColor;
   if (resetStyle !== undefined) style.resetStyle = resetStyle;
   return Object.keys(style).length > 0 ? style : undefined;
 }
