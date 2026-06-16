@@ -167,10 +167,14 @@ Field button options:
 - `clipboardText`: Literal string to copy in `clipboard` mode.
 - `clipboardValueKey`: Dot-path to read from the current field value in `clipboard` mode. Defaults to the whole field value.
 - `clipboardContextValueKey`: Dot-path to read from field context in `clipboard` mode.
-- `clipboardSuccess`: Success notice shown after copying.
+- `clipboardSuccess`: Temporary button message shown after copying.
 - `placement`: Manifest action placement to match. Defaults to `field`.
 - `manifestRoute`: Provider manifest route. Defaults to `.well-known/actions`.
 - `allowedTargetPluginIds`: Cross-plugin targets allowed when resolving manifest actions.
+- `cooldownMs`: Time in milliseconds before temporary button feedback resets. Defaults to `2000`.
+- `buttonStyle`: Optional button colors, for example `{ color, backgroundColor }`.
+- `feedback`: Optional temporary labels and styles for `progress`, `success`, and `error` phases.
+- `resultEffect`: Optional primitive response shortcut. If the action endpoint returns a string, this can turn it into a `clipboard`, `open`, or `download` effect.
 - `pollIntervalMs` and `pollTimeoutMs`: Async job polling controls.
 
 Clipboard mode uses the browser `navigator.clipboard.writeText()` API. It requires a secure browser context, usually HTTPS or localhost, and browser permission. It does not call the backend.
@@ -289,6 +293,29 @@ type ActionDescriptor = {
   contextKey?: string;
   contextValueKey?: string;
   disabled?: boolean;
+  cooldownMs?: number;
+  buttonStyle?: {
+    color?: string;
+    backgroundColor?: string;
+  };
+  feedback?: {
+    progress?: string;
+    success?: string;
+    error?: string;
+    progressStyle?: { color?: string; backgroundColor?: string; resetStyle?: boolean };
+    successStyle?: { color?: string; backgroundColor?: string; resetStyle?: boolean };
+    errorStyle?: { color?: string; backgroundColor?: string; resetStyle?: boolean };
+  };
+  resultEffect?:
+    | "clipboard"
+    | "copy"
+    | "open"
+    | "download"
+    | {
+        type: "clipboard" | "copy" | "open" | "download";
+        target?: "self" | "blank";
+        filename?: string;
+      };
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
 };
@@ -314,6 +341,10 @@ Optional fields:
 - `contextKey`: Include widget context in the request payload under this key.
 - `contextValueKey`: Dot-path to read from widget context before writing it to `contextKey`. If omitted, the full context object is sent.
 - `disabled`: Render the action as unavailable.
+- `cooldownMs`: Time in milliseconds before temporary button feedback resets. Defaults to `2000`.
+- `buttonStyle`: Optional base button colors.
+- `feedback`: Optional temporary progress, success, and error text/styles.
+- `resultEffect`: Optional shortcut for string responses. Use it only when the action endpoint is expected to return a URL or copy text directly.
 - `pollIntervalMs`: Default polling interval for async job status routes. Defaults to `1500`.
 - `pollTimeoutMs`: Maximum time to wait for an async job before showing a timeout. Defaults to `120000`.
 
@@ -409,11 +440,108 @@ export default defineConfig({
 });
 ```
 
-The maintenance provider can expose buttons for toggling, enabling, and disabling maintenance mode. The provider owns those API routes; `emdash-actions` only renders the buttons and calls the configured endpoints.
+The maintenance provider can expose a single toggle button for maintenance mode. The provider owns the API route and persisted state; `emdash-actions` renders the button, calls the configured endpoint, and can update that clicked button from the successful result.
+
+## Action Responses
+
+Action responses can update the clicked button inline, patch the stable action descriptor, trigger browser effects, and show Kumo toasts. The response body may be plain JSON, or the value wrapped by EmDash `apiSuccess()`.
+
+Temporary feedback is shown inside the clicked button. During progress or terminal results, `message` wins first, then object-style `notification.message`, then configured `feedback.progress`, `feedback.success`, or `feedback.error`, then legacy `label`, then the default fallback. Temporary feedback resets after `cooldownMs`.
+
+Use `action` for persistent next-state button changes. This is the contract to use for toggles such as maintenance mode:
+
+```ts
+// Response body from POST /_emdash/api/plugins/maintenance/toggle
+{
+  ok: true,
+  message: "Maintenance mode enabled.",
+  action: {
+    label: "Disable maintenance mode",
+    tone: "danger",
+  },
+}
+```
+
+After the next click, the provider can toggle back:
+
+```ts
+{
+  ok: true,
+  message: "Maintenance mode disabled.",
+  action: {
+    label: "Enable maintenance mode",
+    tone: "positive",
+  },
+}
+```
+
+The stable `action.label` is merged into the clicked action and is not cleared by `cooldownMs`. A full dashboard reload still depends on the provider manifest reading current persisted state and returning the correct label. For maintenance mode, the labels should be exactly `Enable maintenance mode` and `Disable maintenance mode`.
+
+Supported stable patch fields are:
+
+```ts
+type ActionResultActionPatch = {
+  label?: string;
+  icon?: string | null;
+  tone?: "default" | "positive" | "warning" | "danger" | "info" | null;
+  description?: string | null;
+  disabled?: boolean;
+  confirm?: string | null;
+  payload?: Record<string, unknown> | null;
+};
+```
+
+Use `effects` for browser actions after a terminal successful result:
+
+```ts
+{
+  ok: true,
+  message: "Archive ready.",
+  effects: {
+    clipboard: { text: "https://example.com/archive.zip" },
+    open: { url: "https://example.com/archive.zip", target: "blank" },
+    download: { route: "exports/latest.zip", filename: "latest.zip" },
+    reload: { delayMs: 1500 },
+  },
+}
+```
+
+Top-level aliases are also accepted: `clipboard`, `open`, `download`, and `reload`. `open` and URL downloads accept relative, `http`, or `https` URLs. Protected provider downloads can use `download: { route }`, which fetches through the action target plugin with EmDash auth headers.
+
+For simple provider routes, an action can declare a primitive string fast pass:
+
+```ts
+{
+  id: "entry.copyPreviewUrl",
+  label: "Copy preview URL",
+  route: "preview-url",
+  resultEffect: "clipboard",
+}
+```
+
+If that route returns only a string, the string is copied. The same works for `resultEffect: { type: "open", target: "blank" }` and `resultEffect: { type: "download", filename: "export.zip" }`.
+
+Use `toast` when the result should show a Kumo toast instead of, or in addition to, inline button feedback:
+
+```ts
+{
+  ok: true,
+  action: { label: "Disable maintenance mode" },
+  toast: {
+    type: "success",
+    title: "Maintenance mode enabled",
+    message: "Visitors will see the maintenance page.",
+  },
+}
+```
+
+`toast` accepts one toast, an array of toasts, or `false`. Janitor-style `notification: [{ type, title, message }]` arrays are treated as toasts. Object-style `notification: { type, message }` remains inline feedback compatibility.
 
 ## Async Jobs
 
-For Cloudflare/serverless actions that start longer work, return an accepted result with a `statusRoute`. The button surface keeps the action loading, polls that route, and updates the notice until the job reaches a terminal state.
+Action responses update the clicked button inline. While work is active, the button stays loading and uses the latest response message as temporary text. Terminal success and error messages reset after `cooldownMs` unless the result patches the stable action descriptor.
+
+For Cloudflare/serverless actions that start longer work, return an accepted result with a `statusRoute`. The button surface keeps the action loading, polls that route, and updates the button feedback until the job reaches a terminal state.
 
 Initial action response from the provider route that starts the job:
 
@@ -462,8 +590,8 @@ Terminal status route response:
 Supported job statuses:
 
 - `accepted`, `queued`, `running`: The widget keeps polling.
-- `succeeded`: The widget stops polling and shows a success notice.
-- `failed`, `cancelled`: The widget stops polling and shows an error notice.
+- `succeeded`: The widget stops polling and shows temporary success feedback.
+- `failed`, `cancelled`: The widget stops polling and shows temporary error feedback.
 
 `statusRoute` must be a relative plugin route under the action's target plugin. The same route validation rules apply as for action routes.
 

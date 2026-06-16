@@ -1,4 +1,14 @@
-import { Badge, Banner, Button, Empty, LayerCard, Loader, Text } from "@cloudflare/kumo";
+import {
+  Badge,
+  Banner,
+  Button,
+  Empty,
+  LayerCard,
+  Loader,
+  Text,
+  Toasty,
+  createKumoToastManager,
+} from "@cloudflare/kumo";
 import {
   CheckCircleIcon,
   ClipboardTextIcon,
@@ -9,7 +19,7 @@ import {
   XCircleIcon,
 } from "@phosphor-icons/react";
 import { apiFetch, parseApiResponse } from "emdash/plugin-utils";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import {
   DEFAULT_MANIFEST_ROUTE,
@@ -22,13 +32,20 @@ import {
 } from "./shared";
 import type {
   ActionButtonMode,
+  ActionButtonStyle,
   ActionButtonContext,
   ActionButtonFieldOptions,
   ActionDescriptor,
+  ActionFeedbackOptions,
   ActionJobStatus,
   ActionMethod,
   ActionProviderConfig,
+  ActionResultActionPatch,
+  ActionResultEffectPreset,
+  ActionResultEffects,
+  ActionResultOpenTarget,
   ActionRunResult,
+  ActionToast,
   ActionsManifest,
   ActionsProvidersResponse,
   ActionTone,
@@ -81,10 +98,14 @@ type CurrentUserContext = {
 
 type NoticeTone = ActionTone | "error" | "success";
 
-type Notice = {
+type ButtonFeedback = {
   tone: NoticeTone;
   message: string;
+  style?: ActionButtonStyle;
+  className?: string;
 } | null;
+
+type FeedbackTimer = ReturnType<typeof globalThis.setTimeout>;
 
 type FieldWidgetProps<TOptions = Record<string, unknown>> = {
   value: unknown;
@@ -104,6 +125,8 @@ type DashboardWidgetProps = {
 const ACTION_METHODS = new Set<ActionMethod>(["POST", "PUT", "PATCH", "DELETE"]);
 const ACTION_BUTTON_MODES = new Set<ActionButtonMode>(["run", "clipboard"]);
 const ACTION_TONES = new Set<ActionTone>(["default", "positive", "warning", "danger", "info"]);
+const ACTION_RESULT_EFFECT_PRESETS = new Set(["clipboard", "copy", "open", "download"]);
+const ACTION_RESULT_OPEN_TARGETS = new Set<ActionResultOpenTarget>(["self", "blank"]);
 const PENDING_JOB_STATUSES = new Set<string>(["accepted", "queued", "running"]);
 const FAILED_JOB_STATUSES = new Set<string>(["failed", "cancelled"]);
 const MAX_ACTIONS_PER_PROVIDER = 50;
@@ -113,6 +136,10 @@ const MIN_POLL_INTERVAL_MS = 250;
 const MAX_POLL_INTERVAL_MS = 30000;
 const DEFAULT_POLL_TIMEOUT_MS = 120000;
 const MAX_POLL_TIMEOUT_MS = 900000;
+const DEFAULT_FEEDBACK_COOLDOWN_MS = 2000;
+const MAX_FEEDBACK_COOLDOWN_MS = 60000;
+
+const actionToastManager = createKumoToastManager();
 
 const shellStyle = {
   display: "grid",
@@ -168,10 +195,23 @@ const fieldHeaderStyle = {
   minWidth: 0,
 } satisfies CSSProperties;
 
-function ActionsWidget({ context }: DashboardWidgetProps = {}) {
+function ActionRuntimeShell({ children }: { children: ReactNode }) {
+  return <Toasty toastManager={actionToastManager}>{children}</Toasty>;
+}
+
+function ActionsWidget(props: DashboardWidgetProps = {}) {
+  return (
+    <ActionRuntimeShell>
+      <ActionsWidgetContent {...props} />
+    </ActionRuntimeShell>
+  );
+}
+
+function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [notice, setNotice] = useState<Notice>(null);
+  const [feedbackByKey, setFeedbackByKey] = useState<Record<string, ButtonFeedback>>({});
+  const feedbackTimers = useRef<Record<string, FeedbackTimer>>({});
 
   useEffect(() => {
     let active = true;
@@ -194,20 +234,96 @@ function ActionsWidget({ context }: DashboardWidgetProps = {}) {
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      for (const timer of Object.values(feedbackTimers.current)) {
+        globalThis.clearTimeout(timer);
+      }
+      feedbackTimers.current = {};
+    };
+  }, []);
+
+  function clearActionFeedback(actionKey: string) {
+    const timer = feedbackTimers.current[actionKey];
+    if (timer) {
+      globalThis.clearTimeout(timer);
+      delete feedbackTimers.current[actionKey];
+    }
+
+    setFeedbackByKey((current) => {
+      if (!(actionKey in current)) return current;
+      const next = { ...current };
+      delete next[actionKey];
+      return next;
+    });
+  }
+
+  function setActionFeedback(action: UiAction, feedback: ButtonFeedback, reset = false) {
+    clearActionFeedback(action.key);
+    if (!feedback) return;
+
+    setFeedbackByKey((current) => ({ ...current, [action.key]: feedback }));
+
+    if (reset) {
+      feedbackTimers.current[action.key] = globalThis.setTimeout(() => {
+        clearActionFeedback(action.key);
+      }, feedbackCooldownMs(action));
+    }
+  }
+
+  function applyActionUpdate(action: UiAction, result: ActionRunResult) {
+    const patch = actionPatchFromResult(result);
+    if (!patch) return false;
+
+    setState((current) => {
+      if (current.status !== "ready") return current;
+      return {
+        ...current,
+        actions: current.actions.map((candidate) =>
+          candidate.key === action.key ? mergeActionPatch(candidate, patch) : candidate,
+        ),
+      };
+    });
+    return true;
+  }
+
   async function runAction(action: UiAction) {
     if (action.confirm && !globalThis.confirm(action.confirm)) return;
 
     setBusyKey(action.key);
-    setNotice(null);
+    setActionFeedback(action, progressFeedbackForAction(action));
     try {
       const actionContext = await contextForAction(action, context, resolveDashboardContext);
-      const result = await callAction<ActionRunResult>(action, actionContext);
+      const result = normalizeActionRunResult(action, await callAction(action, actionContext));
       const finalResult = await waitForActionResult(action, result, (progress) => {
-        setNotice(noticeFromResult(action, progress));
+        setActionFeedback(action, feedbackFromResult(action, progress));
       });
-      setNotice(noticeFromResult(action, finalResult, `${action.label} finished.`));
+      showActionToasts(finalResult);
+      if (isSuccessfulTerminalResult(finalResult)) {
+        const updated = applyActionUpdate(action, finalResult);
+        await runActionEffects(action, finalResult);
+        if (updated && actionPatchChangesLabel(finalResult)) {
+          clearActionFeedback(action.key);
+        } else {
+          setActionFeedback(
+            action,
+            feedbackFromResult(action, finalResult, `${action.label} finished.`),
+            true,
+          );
+        }
+      } else {
+        setActionFeedback(
+          action,
+          feedbackFromResult(
+            action,
+            finalResult,
+            isErrorResult(finalResult) ? `${action.label} failed.` : `${action.label} is running.`,
+          ),
+          true,
+        );
+      }
     } catch (error) {
-      setNotice({ tone: "error", message: errorMessage(error) });
+      setActionFeedback(action, { tone: "error", message: errorMessage(error) }, true);
     } finally {
       setBusyKey(null);
     }
@@ -236,47 +352,47 @@ function ActionsWidget({ context }: DashboardWidgetProps = {}) {
 
   return (
     <WidgetShell>
-      {notice ? (
-        <Banner
-          icon={noticeIcon(notice.tone)}
-          title={notice.message}
-          variant={bannerVariant(notice.tone)}
-        />
-      ) : null}
-
       {state.actions.length > 0 ? (
         <div style={actionListStyle}>
-          {state.actions.map((action) => (
-            <LayerCard key={action.key}>
-              <LayerCard.Primary>
-                <div style={actionRowContentStyle}>
-                  <div style={actionHeaderStyle}>
-                    <div style={actionTextStyle}>
-                      <Text size="sm">{action.label}</Text>
-                      {action.description ? (
-                        <Text size="xs" variant="secondary">
-                          {action.description}
-                        </Text>
-                      ) : null}
+          {state.actions.map((action) => {
+            const feedback = feedbackByKey[action.key] ?? null;
+            const isBusy = busyKey === action.key;
+
+            return (
+              <LayerCard key={action.key}>
+                <LayerCard.Primary>
+                  <div style={actionRowContentStyle}>
+                    <div style={actionHeaderStyle}>
+                      <div style={actionTextStyle}>
+                        <Text size="sm">{action.label}</Text>
+                        {action.description ? (
+                          <Text size="xs" variant="secondary">
+                            {action.description}
+                          </Text>
+                        ) : null}
+                      </div>
+                      <Badge variant="secondary">
+                        {action.provider.label ?? action.provider.pluginId}
+                      </Badge>
                     </div>
-                    <Badge variant="secondary">
-                      {action.provider.label ?? action.provider.pluginId}
-                    </Badge>
+                    <Button
+                      className={buttonClassName(feedback)}
+                      disabled={busyKey !== null || action.disabled === true}
+                      icon={buttonFeedbackIcon(action, feedback)}
+                      loading={isBusy}
+                      onClick={() => void runAction(action)}
+                      style={buttonStyle(action, feedback)}
+                      title={feedback?.message}
+                      type="button"
+                      variant={buttonVariant(feedback?.tone ?? action.tone)}
+                    >
+                      {feedback?.message ?? action.label}
+                    </Button>
                   </div>
-                  <Button
-                    disabled={busyKey !== null || action.disabled === true}
-                    icon={actionIcon(action)}
-                    loading={busyKey === action.key}
-                    onClick={() => void runAction(action)}
-                    type="button"
-                    variant={buttonVariant(action.tone)}
-                  >
-                    {action.label}
-                  </Button>
-                </div>
-              </LayerCard.Primary>
-            </LayerCard>
-          ))}
+                </LayerCard.Primary>
+              </LayerCard>
+            );
+          })}
         </div>
       ) : (
         <Empty
@@ -304,7 +420,15 @@ function WidgetShell({ children }: { children: ReactNode }) {
   return <div style={shellStyle}>{children}</div>;
 }
 
-export function ActionButtonField({
+export function ActionButtonField(props: FieldWidgetProps<ActionButtonFieldOptions>) {
+  return (
+    <ActionRuntimeShell>
+      <ActionButtonFieldContent {...props} />
+    </ActionRuntimeShell>
+  );
+}
+
+function ActionButtonFieldContent({
   value,
   onChange,
   label,
@@ -318,7 +442,8 @@ export function ActionButtonField({
   const [action, setAction] = useState<UiAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<Notice>(null);
+  const [feedback, setFeedback] = useState<ButtonFeedback>(null);
+  const feedbackTimer = useRef<FeedbackTimer | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -353,6 +478,46 @@ export function ActionButtonField({
     };
   }, [label, options, value]);
 
+  useEffect(() => {
+    return () => {
+      if (feedbackTimer.current) {
+        globalThis.clearTimeout(feedbackTimer.current);
+        feedbackTimer.current = null;
+      }
+    };
+  }, []);
+
+  function clearFieldFeedback() {
+    if (feedbackTimer.current) {
+      globalThis.clearTimeout(feedbackTimer.current);
+      feedbackTimer.current = null;
+    }
+    setFeedback(null);
+  }
+
+  function setFieldFeedback(
+    nextFeedback: ButtonFeedback,
+    reset = false,
+    cooldownSource:
+      | Pick<ActionDescriptor, "cooldownMs">
+      | Pick<ActionButtonFieldOptions, "cooldownMs">
+      | null = action,
+  ) {
+    clearFieldFeedback();
+    if (!nextFeedback) return;
+
+    setFeedback(nextFeedback);
+
+    if (reset) {
+      feedbackTimer.current = globalThis.setTimeout(
+        () => {
+          clearFieldFeedback();
+        },
+        feedbackCooldownMs(cooldownSource ?? undefined),
+      );
+    }
+  }
+
   async function runFieldAction() {
     if (mode === "clipboard") {
       await copyFieldClipboardValue();
@@ -363,20 +528,44 @@ export function ActionButtonField({
     if (action.confirm && !globalThis.confirm(action.confirm)) return;
 
     setBusy(true);
-    setNotice(null);
+    setFieldFeedback(progressFeedbackForAction(action), false, action);
     setError(null);
     try {
       const actionContext = await contextForAction(action, context, () =>
         resolveFieldContext(context, { id, label, required, value }),
       );
-      const result = await callAction<ActionRunResult>(action, actionContext);
+      const result = normalizeActionRunResult(action, await callAction(action, actionContext));
       const finalResult = await waitForActionResult(action, result, (progress) => {
-        setNotice(noticeFromResult(action, progress));
+        setFieldFeedback(feedbackFromResult(action, progress), false, action);
       });
-      setNotice(noticeFromResult(action, finalResult, `${action.label} finished.`));
-      applyFieldResultValue(finalResult, options, onChange);
+      showActionToasts(finalResult);
+      if (isSuccessfulTerminalResult(finalResult)) {
+        const patchedAction = mergeActionResultPatch(action, finalResult);
+        if (patchedAction) setAction(patchedAction);
+        await runActionEffects(action, finalResult);
+        applyFieldResultValue(finalResult, options, onChange);
+        if (patchedAction && actionPatchChangesLabel(finalResult)) {
+          clearFieldFeedback();
+        } else {
+          setFieldFeedback(
+            feedbackFromResult(action, finalResult, `${action.label} finished.`),
+            true,
+            action,
+          );
+        }
+      } else {
+        setFieldFeedback(
+          feedbackFromResult(
+            action,
+            finalResult,
+            isErrorResult(finalResult) ? `${action.label} failed.` : `${action.label} is running.`,
+          ),
+          true,
+          action,
+        );
+      }
     } catch (runError) {
-      setNotice({ tone: "error", message: errorMessage(runError) });
+      setFieldFeedback({ tone: "error", message: errorMessage(runError) }, true, action);
     } finally {
       setBusy(false);
     }
@@ -386,7 +575,7 @@ export function ActionButtonField({
     if (options?.confirm && !globalThis.confirm(options.confirm)) return;
 
     setBusy(true);
-    setNotice(null);
+    clearFieldFeedback();
     setError(null);
     try {
       const clipboardContext = optionalFieldString(options?.clipboardContextValueKey)
@@ -394,12 +583,16 @@ export function ActionButtonField({
         : context;
       const text = clipboardText(options, value, clipboardContext);
       await writeClipboardText(text);
-      setNotice({
-        tone: "success",
-        message: optionalFieldString(options?.clipboardSuccess) ?? "Copied to clipboard.",
-      });
+      setFieldFeedback(
+        {
+          tone: "success",
+          message: optionalFieldString(options?.clipboardSuccess) ?? "Copied to clipboard.",
+        },
+        true,
+        options ?? null,
+      );
     } catch (copyError) {
-      setNotice({ tone: "error", message: errorMessage(copyError) });
+      setFieldFeedback({ tone: "error", message: errorMessage(copyError) }, true, options ?? null);
     } finally {
       setBusy(false);
     }
@@ -423,23 +616,21 @@ export function ActionButtonField({
       ) : null}
 
       {error ? <Banner title={error} variant="error" /> : null}
-      {notice ? (
-        <Banner
-          icon={noticeIcon(notice.tone)}
-          title={notice.message}
-          variant={bannerVariant(notice.tone)}
-        />
-      ) : null}
 
       <Button
+        className={buttonClassName(feedback)}
         disabled={disabled || action?.disabled === true}
-        icon={fieldButtonIcon(mode, action, options)}
+        icon={fieldButtonFeedbackIcon(mode, action, options, feedback)}
         loading={busy}
         onClick={() => void runFieldAction()}
+        style={buttonStyle(action, feedback, options)}
+        title={feedback?.message}
         type="button"
-        variant={buttonVariant(action?.tone ?? readOptionalFieldTone(options?.tone))}
+        variant={buttonVariant(
+          feedback?.tone ?? action?.tone ?? readOptionalFieldTone(options?.tone),
+        )}
       >
-        {buttonLabel}
+        {feedback?.message ?? buttonLabel}
       </Button>
     </div>
   );
@@ -511,8 +702,12 @@ async function resolveFieldAction(
         method: readFieldMethod(options?.method),
         payload: mergeFieldPayload(undefined, options, value),
         placement: optionalFieldString(options?.placement) ?? "field",
+        buttonStyle: readOptionalButtonStyle(options?.buttonStyle, "buttonStyle"),
+        cooldownMs: positiveFieldNumber(options?.cooldownMs),
+        feedback: readOptionalFeedback(options?.feedback, "feedback"),
         pollIntervalMs: positiveFieldNumber(options?.pollIntervalMs),
         pollTimeoutMs: positiveFieldNumber(options?.pollTimeoutMs),
+        resultEffect: readOptionalResultEffect(options?.resultEffect, "resultEffect"),
         route,
         tone: readFieldTone(options?.tone),
       },
@@ -543,10 +738,16 @@ async function resolveFieldAction(
       contextValueKey: optionalFieldString(options?.contextValueKey) ?? action.contextValueKey,
       description: optionalFieldString(options?.description) ?? action.description,
       disabled: options?.disabled ?? action.disabled,
+      buttonStyle:
+        readOptionalButtonStyle(options?.buttonStyle, "buttonStyle") ?? action.buttonStyle,
+      feedback: readOptionalFeedback(options?.feedback, "feedback") ?? action.feedback,
       label: optionalFieldString(options?.label) ?? action.label,
       payload: mergeFieldPayload(action.payload, options, value),
+      cooldownMs: positiveFieldNumber(options?.cooldownMs) ?? action.cooldownMs,
       pollIntervalMs: positiveFieldNumber(options?.pollIntervalMs) ?? action.pollIntervalMs,
       pollTimeoutMs: positiveFieldNumber(options?.pollTimeoutMs) ?? action.pollTimeoutMs,
+      resultEffect:
+        readOptionalResultEffect(options?.resultEffect, "resultEffect") ?? action.resultEffect,
     },
     provider,
   );
@@ -880,10 +1081,7 @@ async function apiGet<T>(route: string): Promise<T> {
   return parseApiResponse<T>(response, "Failed to load actions");
 }
 
-async function callAction<T>(
-  action: UiAction,
-  context: ActionButtonContext | undefined,
-): Promise<T> {
+async function callAction(action: UiAction, context: ActionButtonContext | undefined) {
   const method = action.method ?? "POST";
   const headers = new Headers();
   const init: RequestInit = { headers, method };
@@ -895,12 +1093,13 @@ async function callAction<T>(
   }
 
   const response = await apiFetch(providerPluginRoute(action.targetPluginId, action.route), init);
-  return parseApiResponse<T>(response, `Failed to run ${action.label}`);
+  return parseApiResponse<unknown>(response, `Failed to run ${action.label}`);
 }
 
 async function pollActionStatus(action: UiAction, statusRoute: string): Promise<ActionRunResult> {
   const response = await apiFetch(providerPluginRoute(action.targetPluginId, statusRoute));
-  return parseApiResponse<ActionRunResult>(response, `Failed to poll ${action.label}`);
+  const result = await parseApiResponse<unknown>(response, `Failed to poll ${action.label}`);
+  return normalizeActionRunResult(action, result);
 }
 
 async function waitForActionResult(
@@ -981,8 +1180,21 @@ function pollTimeoutMs(action: ActionDescriptor) {
   );
 }
 
+function feedbackCooldownMs(
+  source:
+    | Pick<ActionDescriptor, "cooldownMs">
+    | Pick<ActionButtonFieldOptions, "cooldownMs">
+    | undefined,
+) {
+  return clampFeedbackMs(numberOrNull(source?.cooldownMs) ?? DEFAULT_FEEDBACK_COOLDOWN_MS);
+}
+
 function clampPollMs(value: number) {
   return Math.min(MAX_POLL_INTERVAL_MS, Math.max(MIN_POLL_INTERVAL_MS, value));
+}
+
+function clampFeedbackMs(value: number) {
+  return Math.min(MAX_FEEDBACK_COOLDOWN_MS, Math.max(0, value));
 }
 
 function numberOrNull(value: unknown) {
@@ -997,6 +1209,339 @@ function hasJsonBody(method: ActionMethod) {
   return method !== "DELETE";
 }
 
+function normalizeActionRunResult(action: ActionDescriptor, value: unknown): ActionRunResult {
+  const record = asRecord(value);
+  if (record) return record as ActionRunResult;
+
+  if (typeof value === "string") {
+    const effects = effectsFromResultEffect(action.resultEffect, value);
+    if (effects) {
+      return {
+        ok: true,
+        status: 200,
+        effects,
+      };
+    }
+
+    return {
+      ok: true,
+      status: 200,
+      message: value,
+    };
+  }
+
+  if (value === undefined || value === null) {
+    return {
+      ok: true,
+      status: 200,
+    };
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    value,
+  };
+}
+
+function effectsFromResultEffect(
+  preset: ActionResultEffectPreset | undefined,
+  value: string,
+): ActionResultEffects | null {
+  if (!preset) return null;
+
+  if (typeof preset === "string") {
+    if (preset === "clipboard" || preset === "copy") return { clipboard: { text: value } };
+    if (preset === "open") return { open: { url: value, target: "blank" } };
+    if (preset === "download") return { download: { url: value } };
+    return null;
+  }
+
+  if (preset.type === "clipboard" || preset.type === "copy") {
+    return { clipboard: { text: value } };
+  }
+
+  if (preset.type === "open") {
+    return { open: { url: value, target: preset.target ?? "blank" } };
+  }
+
+  if (preset.type === "download") {
+    return { download: { url: value, filename: preset.filename } };
+  }
+
+  return null;
+}
+
+function actionPatchFromResult(result: ActionRunResult): ActionResultActionPatch | null {
+  const patch = asRecord(result.action);
+  if (!patch) return null;
+
+  const next: ActionResultActionPatch = {};
+  if (Object.hasOwn(patch, "label")) next.label = readRequiredString(patch.label, "action.label");
+  if (Object.hasOwn(patch, "icon")) next.icon = readNullableString(patch.icon, "action.icon");
+  if (Object.hasOwn(patch, "tone")) next.tone = readNullableTone(patch.tone, "action.tone");
+  if (Object.hasOwn(patch, "description")) {
+    next.description = readNullableString(patch.description, "action.description");
+  }
+  if (Object.hasOwn(patch, "disabled")) {
+    next.disabled = readOptionalBoolean(patch.disabled, "action.disabled") ?? false;
+  }
+  if (Object.hasOwn(patch, "confirm")) {
+    next.confirm = readNullableString(patch.confirm, "action.confirm");
+  }
+  if (Object.hasOwn(patch, "payload")) next.payload = readNullablePayload(patch.payload);
+
+  return Object.keys(next).length > 0 ? next : null;
+}
+
+function mergeActionResultPatch<TAction extends UiAction>(
+  action: TAction,
+  result: ActionRunResult,
+): TAction | null {
+  const patch = actionPatchFromResult(result);
+  return patch ? mergeActionPatch(action, patch) : null;
+}
+
+function mergeActionPatch<TAction extends UiAction>(
+  action: TAction,
+  patch: ActionResultActionPatch,
+): TAction {
+  const next = { ...action };
+
+  if (patch.label !== undefined) next.label = patch.label;
+  if (Object.hasOwn(patch, "icon")) {
+    if (patch.icon === null) delete next.icon;
+    else next.icon = patch.icon;
+  }
+  if (Object.hasOwn(patch, "tone")) {
+    if (patch.tone === null) delete next.tone;
+    else next.tone = patch.tone;
+  }
+  if (Object.hasOwn(patch, "description")) {
+    if (patch.description === null) delete next.description;
+    else next.description = patch.description;
+  }
+  if (patch.disabled !== undefined) next.disabled = patch.disabled;
+  if (Object.hasOwn(patch, "confirm")) {
+    if (patch.confirm === null) delete next.confirm;
+    else next.confirm = patch.confirm;
+  }
+  if (Object.hasOwn(patch, "payload")) {
+    if (patch.payload === null) delete next.payload;
+    else next.payload = patch.payload;
+  }
+
+  return next;
+}
+
+function actionPatchChangesLabel(result: ActionRunResult) {
+  return asRecord(result.action)?.label !== undefined;
+}
+
+function resultPhase(result: ActionRunResult): "progress" | "success" | "error" {
+  if (isErrorResult(result)) return "error";
+  if (shouldContinuePolling(result)) return "progress";
+  return "success";
+}
+
+function isErrorResult(result: ActionRunResult) {
+  const jobStatus = readJobStatus(result);
+  if (jobStatus && FAILED_JOB_STATUSES.has(jobStatus)) return true;
+  if (result.ok === false) return true;
+  return typeof result.status === "number" && result.status >= 400;
+}
+
+function isSuccessfulTerminalResult(result: ActionRunResult) {
+  if (isErrorResult(result)) return false;
+  if (shouldContinuePolling(result)) return false;
+  return result.status !== 202;
+}
+
+async function runActionEffects(action: UiAction, result: ActionRunResult) {
+  const effects = actionResultEffects(result);
+  if (!effects) return;
+
+  const clipboard = clipboardEffectText(effects.clipboard);
+  if (clipboard !== null) await writeClipboardText(clipboard);
+
+  const download = asDownloadEffect(effects.download);
+  if (download) await runDownloadEffect(action, download);
+
+  const open = asOpenEffect(effects.open);
+  if (open) runOpenEffect(open);
+
+  const reload = asReloadEffect(effects.reload);
+  if (reload) scheduleReload(action, reload.delayMs);
+}
+
+function actionResultEffects(result: ActionRunResult): ActionResultEffects | null {
+  const effects = asRecord(result.effects) ? ({ ...result.effects } as ActionResultEffects) : {};
+  if (result.reload !== undefined) effects.reload = result.reload;
+  if (result.open !== undefined) effects.open = result.open;
+  if (result.download !== undefined) effects.download = result.download;
+  if (result.clipboard !== undefined) effects.clipboard = result.clipboard;
+  return Object.keys(effects).length > 0 ? effects : null;
+}
+
+function clipboardEffectText(value: ActionResultEffects["clipboard"] | undefined) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") return value;
+  const text = asRecord(value)?.text;
+  if (typeof text !== "string") throw new Error("Clipboard effect requires text.");
+  return text;
+}
+
+function asOpenEffect(value: ActionResultEffects["open"] | undefined) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") {
+    return {
+      target: "blank" as ActionResultOpenTarget,
+      url: value,
+    };
+  }
+
+  const record = asRecord(value);
+  const url = cleanOptionalString(record?.url);
+  if (!url) throw new Error("Open effect requires a URL.");
+
+  return {
+    target: readOpenTarget(record?.target) ?? "blank",
+    url,
+  };
+}
+
+function asDownloadEffect(value: ActionResultEffects["download"] | undefined) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") return { url: value };
+
+  const record = asRecord(value);
+  if (!record) throw new Error("Download effect must be a string or object.");
+
+  const url = cleanOptionalString(record.url);
+  const route = cleanOptionalString(record.route);
+  if (!url && !route) throw new Error("Download effect requires a URL or route.");
+
+  return {
+    filename: cleanOptionalString(record.filename),
+    route,
+    url,
+  };
+}
+
+function asReloadEffect(value: ActionResultEffects["reload"] | undefined) {
+  if (value === undefined || value === null || value === false) return null;
+  if (value === true) return {};
+
+  const record = asRecord(value);
+  if (!record) throw new Error("Reload effect must be true or an object.");
+  return {
+    delayMs: readOptionalNumber(record.delayMs, "effects.reload.delayMs"),
+  };
+}
+
+function runOpenEffect(effect: { url: string; target: ActionResultOpenTarget }) {
+  const url = safeBrowserUrl(effect.url);
+  if (effect.target === "self") {
+    globalThis.location.assign(url.href);
+    return;
+  }
+  globalThis.open(url.href, "_blank", "noopener,noreferrer");
+}
+
+async function runDownloadEffect(
+  action: UiAction,
+  effect: { filename?: string; route?: string; url?: string },
+) {
+  if (effect.route) {
+    const response = await apiFetch(
+      providerPluginRoute(action.targetPluginId, normalizePluginRoute(effect.route)),
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to download ${effect.filename ?? action.label}`);
+    }
+    const blobUrl = globalThis.URL.createObjectURL(await response.blob());
+    try {
+      triggerDownload(blobUrl, effect.filename);
+    } finally {
+      globalThis.setTimeout(() => globalThis.URL.revokeObjectURL(blobUrl), 0);
+    }
+    return;
+  }
+
+  if (!effect.url) throw new Error("Download effect requires a URL or route.");
+  triggerDownload(safeBrowserUrl(effect.url).href, effect.filename);
+}
+
+function triggerDownload(url: string, filename: string | undefined) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename ?? "";
+  anchor.rel = "noopener noreferrer";
+  anchor.style.display = "none";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function scheduleReload(action: ActionDescriptor, delayMs: number | undefined) {
+  const delay = clampFeedbackMs(delayMs ?? feedbackCooldownMs(action));
+  globalThis.setTimeout(() => {
+    globalThis.location.reload();
+  }, delay);
+}
+
+function safeBrowserUrl(value: string) {
+  const base = typeof window === "undefined" ? "http://localhost" : window.location.href;
+  const url = new URL(value, base);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Action URL must use http, https, or be relative.");
+  }
+  return url;
+}
+
+function showActionToasts(result: ActionRunResult) {
+  for (const toast of actionToasts(result)) {
+    const title = cleanOptionalString(toast.title);
+    const message = cleanOptionalString(toast.message);
+    if (!title && !message) continue;
+
+    actionToastManager.add({
+      id: cleanOptionalString(toast.id),
+      title: title ?? message ?? "Action finished",
+      description: message && message !== title ? message : undefined,
+      timeout: numberOrNull(toast.timeoutMs) ?? undefined,
+      variant: toastVariant(toast.type),
+    });
+  }
+}
+
+function actionToasts(result: ActionRunResult): ActionToast[] {
+  const toast = result.toast;
+  const toasts: ActionToast[] = [];
+  if (toast !== false) {
+    if (Array.isArray(toast)) toasts.push(...toast.filter(isActionToast));
+    else if (isActionToast(toast)) toasts.push(toast);
+  }
+
+  if (Array.isArray(result.notification)) {
+    toasts.push(...result.notification.filter(isActionToast));
+  }
+
+  return toasts;
+}
+
+function isActionToast(value: unknown): value is ActionToast {
+  return !!asRecord(value);
+}
+
+function toastVariant(type: ActionToast["type"]) {
+  if (type === "positive" || type === "success") return "success";
+  if (type === "danger" || type === "error") return "error";
+  if (type === "warning") return "warning";
+  if (type === "info") return "info";
+  return "default";
+}
+
 function matchesPlacement(action: ActionDescriptor, placement: string | null) {
   return (
     !placement ||
@@ -1006,13 +1551,74 @@ function matchesPlacement(action: ActionDescriptor, placement: string | null) {
   );
 }
 
-function buttonVariant(tone: ActionTone | undefined) {
-  if (tone === "danger") return "destructive";
+function buttonVariant(tone: NoticeTone | undefined) {
+  if (tone === "danger" || tone === "error") return "destructive";
   return "secondary";
+}
+
+function buttonStyle(
+  action: Pick<ActionDescriptor, "buttonStyle"> | null,
+  feedback: ButtonFeedback,
+  options?: Pick<ActionButtonFieldOptions, "buttonStyle">,
+) {
+  const base = options?.buttonStyle ?? action?.buttonStyle;
+  const style = mergeButtonStyle(base, feedback?.style);
+  return style && Object.keys(style).length > 0 ? style : undefined;
+}
+
+function mergeButtonStyle(
+  base: ActionButtonStyle | undefined,
+  override: ActionButtonStyle | undefined,
+) {
+  const source = override?.resetStyle ? undefined : base;
+  const style: CSSProperties = {};
+  if (source?.color) style.color = source.color;
+  if (source?.backgroundColor) style.backgroundColor = source.backgroundColor;
+  if (override?.color) style.color = override.color;
+  if (override?.backgroundColor) style.backgroundColor = override.backgroundColor;
+  return style;
+}
+
+function mergeActionButtonStyle(
+  base: ActionButtonStyle | undefined,
+  override: ActionButtonStyle,
+): ActionButtonStyle {
+  return override.resetStyle ? override : { ...base, ...override };
+}
+
+function buttonClassName(feedback: ButtonFeedback) {
+  if (!feedback || feedback.style?.backgroundColor || feedback.style?.color) return undefined;
+  if (feedback.className) return feedback.className;
+  if (feedback.tone === "danger" || feedback.tone === "error") {
+    return "!border-kumo-danger !bg-kumo-danger !text-white";
+  }
+  if (feedback.tone === "positive" || feedback.tone === "success") {
+    return "!border-kumo-success !bg-kumo-success !text-white";
+  }
+  if (feedback.tone === "warning") {
+    return "!border-kumo-warning !bg-kumo-warning !text-white";
+  }
+  if (feedback.tone === "info") {
+    return "!border-kumo-info !bg-kumo-info !text-white";
+  }
+  return undefined;
 }
 
 function actionIcon(action: ActionDescriptor) {
   return fieldIcon(action.icon);
+}
+
+function buttonFeedbackIcon(action: ActionDescriptor, feedback: ButtonFeedback) {
+  return feedback ? feedbackIcon(feedback.tone) : actionIcon(action);
+}
+
+function fieldButtonFeedbackIcon(
+  mode: ActionButtonMode,
+  action: ActionDescriptor | null,
+  options: ActionButtonFieldOptions | undefined,
+  feedback: ButtonFeedback,
+) {
+  return feedback ? feedbackIcon(feedback.tone) : fieldButtonIcon(mode, action, options);
 }
 
 function fieldButtonIcon(
@@ -1041,28 +1647,31 @@ function fieldDefaultButtonLabel(mode: ActionButtonMode) {
   return mode === "clipboard" ? "Copy" : "Run action";
 }
 
-function noticeIcon(tone: NoticeTone) {
+function feedbackIcon(tone: NoticeTone) {
   if (tone === "warning") return <WarningIcon weight="fill" />;
   if (tone === "danger" || tone === "error") return <XCircleIcon weight="fill" />;
   if (tone === "positive" || tone === "success") return <CheckCircleIcon weight="fill" />;
   return <LightningIcon weight="fill" />;
 }
 
-function bannerVariant(tone: NoticeTone) {
-  if (tone === "warning") return "alert";
-  if (tone === "danger" || tone === "error") return "error";
-  if (tone === "default" || tone === "info") return "default";
-  return "secondary";
-}
-
-function noticeFromResult(
+function feedbackFromResult(
   action: ActionDescriptor,
   result: ActionRunResult,
   fallbackMessage = `${action.label} is running.`,
-): Notice {
+): ButtonFeedback {
+  const phase = resultPhase(result);
   return {
     tone: resultTone(result),
-    message: resultMessage(result, fallbackMessage),
+    message: resultMessage(action, result, phase, fallbackMessage),
+    style: resultFeedbackStyle(action, result, phase),
+  };
+}
+
+function progressFeedbackForAction(action: ActionDescriptor): ButtonFeedback {
+  return {
+    tone: "info",
+    message: action.feedback?.progress ?? `${action.label} is running.`,
+    style: action.feedback?.progressStyle,
   };
 }
 
@@ -1071,11 +1680,28 @@ function resultTone(result: ActionRunResult): NoticeTone {
   if (jobStatus && FAILED_JOB_STATUSES.has(jobStatus)) return "error";
   if (jobStatus && PENDING_JOB_STATUSES.has(jobStatus)) return "info";
   if (result.ok === false) return "error";
-  return result.notification?.type ?? result.severity ?? "success";
+  return inlineNotification(result)?.type ?? result.severity ?? "success";
 }
 
-function resultMessage(result: ActionRunResult, fallbackMessage: string) {
-  const base = result.notification?.message ?? result.message ?? fallbackMessage;
+function resultMessage(
+  action: ActionDescriptor,
+  result: ActionRunResult,
+  phase: "progress" | "success" | "error",
+  fallbackMessage: string,
+) {
+  const phaseMessage =
+    phase === "progress"
+      ? action.feedback?.progress
+      : phase === "error"
+        ? (cleanOptionalString(result.error) ?? action.feedback?.error)
+        : (cleanOptionalString(result.success) ?? action.feedback?.success);
+
+  const base =
+    cleanOptionalString(result.message) ??
+    cleanOptionalString(inlineNotification(result)?.message) ??
+    phaseMessage ??
+    cleanOptionalString(result.label) ??
+    fallbackMessage;
   const progress = progressLabel(result.progress);
   const jobStatus = readJobStatus(result) as ActionJobStatus | null;
   const prefix = jobStatus ? jobStatusLabel(jobStatus) : null;
@@ -1083,6 +1709,34 @@ function resultMessage(result: ActionRunResult, fallbackMessage: string) {
     prefix && !base.toLowerCase().startsWith(prefix.toLowerCase()) ? `${prefix}: ${base}` : base;
 
   return progress ? `${message} (${progress})` : message;
+}
+
+function inlineNotification(result: ActionRunResult) {
+  return Array.isArray(result.notification) ? null : result.notification;
+}
+
+function resultFeedbackStyle(
+  action: ActionDescriptor,
+  result: ActionRunResult,
+  phase: "progress" | "success" | "error",
+) {
+  const configured =
+    phase === "progress"
+      ? action.feedback?.progressStyle
+      : phase === "error"
+        ? action.feedback?.errorStyle
+        : action.feedback?.successStyle;
+
+  const override: ActionButtonStyle = {};
+  const color = cleanOptionalString(result.color);
+  const backgroundColor = cleanOptionalString(result.backgroundColor);
+  if (color) override.color = color;
+  if (backgroundColor) override.backgroundColor = backgroundColor;
+  if (result.resetStyle === true) override.resetStyle = true;
+
+  return Object.keys(override).length > 0
+    ? mergeActionButtonStyle(configured, override)
+    : configured;
 }
 
 function jobStatusLabel(status: ActionJobStatus | string) {
@@ -1146,8 +1800,11 @@ function parseActionDescriptor(
     confirm: readOptionalString(record.confirm, "confirm"),
     contextKey: readOptionalString(record.contextKey, "contextKey"),
     contextValueKey: readOptionalString(record.contextValueKey, "contextValueKey"),
+    buttonStyle: readOptionalButtonStyle(record.buttonStyle, "buttonStyle"),
+    cooldownMs: readOptionalNumber(record.cooldownMs, "cooldownMs"),
     description: readOptionalString(record.description, "description"),
     disabled: readOptionalBoolean(record.disabled, "disabled"),
+    feedback: readOptionalFeedback(record.feedback, "feedback"),
     icon: readOptionalString(record.icon, "icon"),
     method: readMethod(record.method),
     payload,
@@ -1155,6 +1812,7 @@ function parseActionDescriptor(
     pollIntervalMs: readOptionalNumber(record.pollIntervalMs, "pollIntervalMs"),
     pollTimeoutMs: readOptionalNumber(record.pollTimeoutMs, "pollTimeoutMs"),
     pluginId: targetPluginId,
+    resultEffect: readOptionalResultEffect(record.resultEffect, "resultEffect"),
     resultMode: readOptionalString(record.resultMode, "resultMode"),
     tone: readTone(record.tone),
   };
@@ -1208,6 +1866,25 @@ function readTone(value: unknown): ActionTone | undefined {
   return tone as ActionTone;
 }
 
+function readNullableTone(value: unknown, field: string): ActionTone | null | undefined {
+  if (value === null) return null;
+  try {
+    return readTone(value);
+  } catch (error) {
+    throw new Error(`${field}: ${errorMessage(error)}`);
+  }
+}
+
+function readOpenTarget(value: unknown): ActionResultOpenTarget | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new Error("Open target must be a string");
+  const target = value.trim();
+  if (!ACTION_RESULT_OPEN_TARGETS.has(target as ActionResultOpenTarget)) {
+    throw new Error(`Unsupported open target: ${value}`);
+  }
+  return target as ActionResultOpenTarget;
+}
+
 function readOptionalBoolean(value: unknown, field: string) {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "boolean") throw new Error(`Action ${field} must be a boolean`);
@@ -1227,6 +1904,88 @@ function readPayload(value: unknown): Record<string, unknown> | undefined {
   const record = asRecord(value);
   if (!record) throw new Error("Action payload must be an object");
   return record;
+}
+
+function readNullablePayload(value: unknown): Record<string, unknown> | null | undefined {
+  if (value === null) return null;
+  return readPayload(value);
+}
+
+function readNullableString(value: unknown, field: string) {
+  if (value === null) return null;
+  return readOptionalString(value, field);
+}
+
+function readOptionalButtonStyle(value: unknown, field: string): ActionButtonStyle | undefined {
+  if (value === undefined || value === null) return undefined;
+  const record = asRecord(value);
+  if (!record) throw new Error(`Action ${field} must be an object`);
+
+  const style: ActionButtonStyle = {};
+  const color = readOptionalString(record.color, `${field}.color`);
+  const backgroundColor = readOptionalString(record.backgroundColor, `${field}.backgroundColor`);
+  const resetStyle = readOptionalBoolean(record.resetStyle, `${field}.resetStyle`);
+  if (color) style.color = color;
+  if (backgroundColor) style.backgroundColor = backgroundColor;
+  if (resetStyle !== undefined) style.resetStyle = resetStyle;
+  return Object.keys(style).length > 0 ? style : undefined;
+}
+
+function readOptionalFeedback(value: unknown, field: string): ActionFeedbackOptions | undefined {
+  if (value === undefined || value === null) return undefined;
+  const record = asRecord(value);
+  if (!record) throw new Error(`Action ${field} must be an object`);
+
+  const feedback: ActionFeedbackOptions = {};
+  const progress = readOptionalString(record.progress, `${field}.progress`);
+  const success = readOptionalString(record.success, `${field}.success`);
+  const error = readOptionalString(record.error, `${field}.error`);
+  const progressStyle = readOptionalButtonStyle(record.progressStyle, `${field}.progressStyle`);
+  const successStyle = readOptionalButtonStyle(record.successStyle, `${field}.successStyle`);
+  const errorStyle = readOptionalButtonStyle(record.errorStyle, `${field}.errorStyle`);
+
+  if (progress) feedback.progress = progress;
+  if (success) feedback.success = success;
+  if (error) feedback.error = error;
+  if (progressStyle) feedback.progressStyle = progressStyle;
+  if (successStyle) feedback.successStyle = successStyle;
+  if (errorStyle) feedback.errorStyle = errorStyle;
+
+  return Object.keys(feedback).length > 0 ? feedback : undefined;
+}
+
+function readOptionalResultEffect(
+  value: unknown,
+  field: string,
+): ActionResultEffectPreset | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") {
+    const preset = value.trim();
+    if (!ACTION_RESULT_EFFECT_PRESETS.has(preset)) {
+      throw new Error(`Unsupported action ${field}: ${value}`);
+    }
+    return preset as ActionResultEffectPreset;
+  }
+
+  const record = asRecord(value);
+  if (!record) throw new Error(`Action ${field} must be a string or object`);
+  const type = readRequiredString(record.type, `${field}.type`);
+  if (!ACTION_RESULT_EFFECT_PRESETS.has(type)) {
+    throw new Error(`Unsupported action ${field}.type: ${type}`);
+  }
+  if (type === "open") {
+    return {
+      type,
+      target: readOpenTarget(record.target),
+    };
+  }
+  if (type === "download") {
+    return {
+      type,
+      filename: readOptionalString(record.filename, `${field}.filename`),
+    };
+  }
+  return { type: type as "clipboard" | "copy" };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

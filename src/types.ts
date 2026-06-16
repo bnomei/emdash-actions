@@ -4,6 +4,16 @@ export type ActionWidgetSize = "full" | "half" | "third";
 export type ActionButtonMode = "run" | "clipboard";
 export type ActionSurface = "field" | "dashboard";
 export type ActionResultMode = "emdash-action-result-v1" | "emdash-action-accepted-v1";
+export type ActionToastType = ActionTone | "success" | "error";
+export type ActionResultOpenTarget = "self" | "blank";
+export type ActionResultEffectPreset =
+  | "clipboard"
+  | "copy"
+  | "open"
+  | "download"
+  | { type: "clipboard" | "copy" }
+  | { type: "open"; target?: ActionResultOpenTarget }
+  | { type: "download"; filename?: string };
 export type ActionJobStatus =
   | "accepted"
   | "queued"
@@ -42,6 +52,46 @@ export interface ActionButtonContext {
   [key: string]: unknown;
 }
 
+export interface ActionButtonStyle {
+  color?: string;
+  backgroundColor?: string;
+  resetStyle?: boolean;
+}
+
+export interface ActionFeedbackOptions {
+  progress?: string;
+  success?: string;
+  error?: string;
+  progressStyle?: ActionButtonStyle;
+  successStyle?: ActionButtonStyle;
+  errorStyle?: ActionButtonStyle;
+}
+
+export interface ActionResultActionPatch {
+  label?: string;
+  icon?: string | null;
+  tone?: ActionTone | null;
+  description?: string | null;
+  disabled?: boolean;
+  confirm?: string | null;
+  payload?: Record<string, unknown> | null;
+}
+
+export interface ActionResultEffects {
+  reload?: boolean | { delayMs?: number };
+  open?: string | { url: string; target?: ActionResultOpenTarget };
+  download?: string | { url?: string; route?: string; filename?: string };
+  clipboard?: string | { text: string };
+}
+
+export interface ActionToast {
+  type?: ActionToastType;
+  title?: string;
+  message?: string;
+  id?: string;
+  timeoutMs?: number;
+}
+
 export interface ActionProviderConfig {
   pluginId: string;
   label?: string;
@@ -70,6 +120,10 @@ export interface ActionDescriptor {
   contextKey?: string;
   contextValueKey?: string;
   disabled?: boolean;
+  cooldownMs?: number;
+  buttonStyle?: ActionButtonStyle;
+  feedback?: ActionFeedbackOptions;
+  resultEffect?: ActionResultEffectPreset;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
 }
@@ -100,6 +154,10 @@ export interface ActionButtonFieldOptions {
   clipboardContextValueKey?: string;
   clipboardSuccess?: string;
   disabled?: boolean;
+  cooldownMs?: number;
+  buttonStyle?: ActionButtonStyle;
+  feedback?: ActionFeedbackOptions;
+  resultEffect?: ActionResultEffectPreset;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
 }
@@ -123,12 +181,21 @@ export interface ActionRunResult {
   pollAfterMs?: number;
   statusRoute?: string;
   message?: string;
+  success?: string;
+  error?: string;
   label?: string;
   icon?: string;
-  notification?: {
-    type?: ActionTone | "success" | "error";
-    message?: string;
-  };
+  color?: string;
+  backgroundColor?: string;
+  resetStyle?: boolean;
+  action?: ActionResultActionPatch;
+  effects?: ActionResultEffects;
+  reload?: ActionResultEffects["reload"];
+  open?: ActionResultEffects["open"];
+  download?: ActionResultEffects["download"];
+  clipboard?: ActionResultEffects["clipboard"];
+  toast?: ActionToast | ActionToast[] | false;
+  notification?: ActionToast | ActionToast[];
   [key: string]: unknown;
 }
 
