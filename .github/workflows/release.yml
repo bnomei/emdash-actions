@@ -29,9 +29,10 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Verify release tag
+        if: github.event_name == 'release'
         run: node -e "const fs = require('node:fs'); const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')); const tag = process.env.RELEASE_TAG; if (tag !== pkg.version && tag !== `v${pkg.version}`) { console.error(`Release tag ${tag} does not match package version ${pkg.version}`); process.exit(1); }"
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
