@@ -31,6 +31,7 @@ import {
   pluginRoute,
   providerPluginRoute,
 } from "./shared";
+import { isAbortError, sleep, throwIfAborted } from "./admin-cancellation";
 import type {
   ActionButtonMode,
   ActionButtonStyle,
@@ -224,18 +225,20 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   const busyKeysRef = useRef<ReadonlySet<string>>(new Set());
   const [feedbackByKey, setFeedbackByKey] = useState<Record<string, ButtonFeedback>>({});
   const feedbackTimers = useRef<Record<string, FeedbackTimer>>({});
+  const runAbortControllers = useRef<Record<string, AbortController>>({});
 
   useEffect(() => {
+    const controller = new AbortController();
     let active = true;
 
     async function load() {
       try {
-        const providers = await apiGet<ActionsProvidersResponse>("providers");
-        const result = await loadProviderActions(providers);
+        const providers = await apiGet<ActionsProvidersResponse>("providers", controller.signal);
+        const result = await loadProviderActions(providers, controller.signal);
         if (!active) return;
         setState({ status: "ready", ...result });
       } catch (error) {
-        if (!active) return;
+        if (!active || isAbortError(error)) return;
         setState({ status: "error", message: errorMessage(error) });
       }
     }
@@ -243,6 +246,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
     void load();
     return () => {
       active = false;
+      controller.abort();
     };
   }, []);
 
@@ -252,6 +256,10 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         globalThis.clearTimeout(timer);
       }
       feedbackTimers.current = {};
+      for (const controller of Object.values(runAbortControllers.current)) {
+        controller.abort();
+      }
+      runAbortControllers.current = {};
     };
   }, []);
 
@@ -304,15 +312,32 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
 
     if (isActionBusy(busyKeysRef.current, action.key)) return;
 
+    runAbortControllers.current[action.key]?.abort();
+    const controller = new AbortController();
+    runAbortControllers.current[action.key] = controller;
     busyKeysRef.current = addBusyKey(busyKeysRef.current, action.key);
     setBusyKeys(busyKeysRef.current);
     setActionFeedback(action, progressFeedbackForAction(action));
     try {
-      const actionContext = await contextForAction(action, context, resolveDashboardContext);
-      const result = normalizeActionRunResult(action, await callAction(action, actionContext));
-      const finalResult = await waitForActionResult(action, result, (progress) => {
-        setActionFeedback(action, feedbackFromResult(action, progress));
-      });
+      const actionContext = await contextForAction(
+        action,
+        context,
+        resolveDashboardContext,
+        controller.signal,
+      );
+      throwIfAborted(controller.signal);
+      const result = normalizeActionRunResult(
+        action,
+        await callAction(action, actionContext, controller.signal),
+      );
+      const finalResult = await waitForActionResult(
+        action,
+        result,
+        (progress) => {
+          setActionFeedback(action, feedbackFromResult(action, progress));
+        },
+        controller.signal,
+      );
       showActionToasts(finalResult);
       if (isSuccessfulTerminalResult(finalResult)) {
         const updated = applyActionUpdate(action, finalResult);
@@ -338,12 +363,17 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         );
       }
     } catch (error) {
-      setActionFeedback(
-        action,
-        { phase: "error", tone: "error", message: errorMessage(error) },
-        true,
-      );
+      if (!isAbortError(error)) {
+        setActionFeedback(
+          action,
+          { phase: "error", tone: "error", message: errorMessage(error) },
+          true,
+        );
+      }
     } finally {
+      if (runAbortControllers.current[action.key] === controller) {
+        delete runAbortControllers.current[action.key];
+      }
       busyKeysRef.current = removeBusyKey(busyKeysRef.current, action.key);
       setBusyKeys(busyKeysRef.current);
     }
@@ -464,8 +494,10 @@ function ActionButtonFieldContent({
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<ButtonFeedback>(null);
   const feedbackTimer = useRef<FeedbackTimer | null>(null);
+  const runAbortController = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     let active = true;
 
     async function load() {
@@ -480,12 +512,12 @@ function ActionButtonFieldContent({
           return;
         }
 
-        const resolved = await resolveFieldAction(options, value, label);
+        const resolved = await resolveFieldAction(options, value, label, controller.signal);
         if (!active) return;
         setAction(resolved);
         setError(null);
       } catch (loadError) {
-        if (!active) return;
+        if (!active || isAbortError(loadError)) return;
         setMode("run");
         setAction(null);
         setError(errorMessage(loadError));
@@ -495,6 +527,7 @@ function ActionButtonFieldContent({
     void load();
     return () => {
       active = false;
+      controller.abort();
     };
   }, [label, options, value]);
 
@@ -504,6 +537,8 @@ function ActionButtonFieldContent({
         globalThis.clearTimeout(feedbackTimer.current);
         feedbackTimer.current = null;
       }
+      runAbortController.current?.abort();
+      runAbortController.current = null;
     };
   }, []);
 
@@ -547,17 +582,33 @@ function ActionButtonFieldContent({
     if (!action) return;
     if (action.confirm && !confirmDestructiveAction(action.confirm)) return;
 
+    runAbortController.current?.abort();
+    const controller = new AbortController();
+    runAbortController.current = controller;
+
     setBusy(true);
     setFieldFeedback(progressFeedbackForAction(action), false, action);
     setError(null);
     try {
-      const actionContext = await contextForAction(action, context, () =>
-        resolveFieldContext(context, { id, label, required, value }),
+      const actionContext = await contextForAction(
+        action,
+        context,
+        () => resolveFieldContext(context, { id, label, required, value }, controller.signal),
+        controller.signal,
       );
-      const result = normalizeActionRunResult(action, await callAction(action, actionContext));
-      const finalResult = await waitForActionResult(action, result, (progress) => {
-        setFieldFeedback(feedbackFromResult(action, progress), false, action);
-      });
+      throwIfAborted(controller.signal);
+      const result = normalizeActionRunResult(
+        action,
+        await callAction(action, actionContext, controller.signal),
+      );
+      const finalResult = await waitForActionResult(
+        action,
+        result,
+        (progress) => {
+          setFieldFeedback(feedbackFromResult(action, progress), false, action);
+        },
+        controller.signal,
+      );
       showActionToasts(finalResult);
       if (isSuccessfulTerminalResult(finalResult)) {
         const patchedAction = mergeActionResultPatch(action, finalResult);
@@ -585,13 +636,18 @@ function ActionButtonFieldContent({
         );
       }
     } catch (runError) {
-      setFieldFeedback(
-        { phase: "error", tone: "error", message: errorMessage(runError) },
-        true,
-        action,
-      );
+      if (!isAbortError(runError)) {
+        setFieldFeedback(
+          { phase: "error", tone: "error", message: errorMessage(runError) },
+          true,
+          action,
+        );
+      }
     } finally {
-      setBusy(false);
+      if (runAbortController.current === controller) {
+        runAbortController.current = null;
+        setBusy(false);
+      }
     }
   }
 
@@ -666,11 +722,11 @@ function ActionButtonFieldContent({
   );
 }
 
-async function loadProviderActions(response: ActionsProvidersResponse) {
+async function loadProviderActions(response: ActionsProvidersResponse, signal?: AbortSignal) {
   const results = await Promise.all(
     response.providers.map(async (provider) => {
       try {
-        const manifest = await fetchManifest(provider);
+        const manifest = await fetchManifest(provider, signal);
         return { manifest, provider };
       } catch (error) {
         return { error: errorMessage(error), provider };
@@ -701,8 +757,13 @@ async function loadProviderActions(response: ActionsProvidersResponse) {
   return { actions, errors };
 }
 
-async function fetchManifest(provider: NormalizedActionProviderConfig): Promise<ActionsManifest> {
-  const response = await apiFetch(providerPluginRoute(provider.pluginId, provider.manifestRoute));
+async function fetchManifest(
+  provider: NormalizedActionProviderConfig,
+  signal?: AbortSignal,
+): Promise<ActionsManifest> {
+  const response = await apiFetch(providerPluginRoute(provider.pluginId, provider.manifestRoute), {
+    signal,
+  });
   const manifest = await parseApiResponse<unknown>(
     response,
     `Failed to load ${provider.pluginId} actions`,
@@ -714,6 +775,7 @@ async function resolveFieldAction(
   options: ActionButtonFieldOptions | undefined,
   value: unknown,
   label: string | undefined,
+  signal?: AbortSignal,
 ): Promise<UiAction> {
   const provider = fieldProvider(options);
   const route = optionalFieldString(options?.route);
@@ -750,7 +812,7 @@ async function resolveFieldAction(
     throw new Error("Action button field requires either options.action or options.route");
   }
 
-  const manifest = await fetchManifest(provider);
+  const manifest = await fetchManifest(provider, signal);
   const placement = optionalFieldString(options?.placement) ?? "field";
   const action = manifest.actions.find(
     (candidate) => candidate.id === actionId && matchesPlacement(candidate, placement),
@@ -865,24 +927,27 @@ function readActionContextValue(
 async function contextForAction(
   action: Pick<ActionDescriptor, "contextKey">,
   providedContext: ActionButtonContext | undefined,
-  resolveContext: () => Promise<ActionButtonContext>,
+  resolveContext: (signal?: AbortSignal) => Promise<ActionButtonContext>,
+  signal?: AbortSignal,
 ) {
   if (!optionalFieldString(action.contextKey)) return providedContext;
-  return providedContext ?? resolveContext();
+  throwIfAborted(signal);
+  return providedContext ?? resolveContext(signal);
 }
 
 async function resolveFieldContext(
   providedContext: ActionButtonContext | undefined,
   input: FieldContextInput,
+  signal?: AbortSignal,
 ): Promise<ActionButtonContext> {
   if (providedContext) return providedContext;
 
   const route = readEntryContextRoute();
   const [entry, currentUser] = await Promise.all([
     route.collection && route.entryId
-      ? fetchEntryContextItem(route.collection, route.entryId)
+      ? fetchEntryContextItem(route.collection, route.entryId, signal)
       : Promise.resolve(null),
-    fetchCurrentUserContext(),
+    fetchCurrentUserContext(signal),
   ]);
 
   return compactContext({
@@ -902,8 +967,8 @@ async function resolveFieldContext(
   });
 }
 
-async function resolveDashboardContext(): Promise<ActionButtonContext> {
-  const currentUser = await fetchCurrentUserContext();
+async function resolveDashboardContext(signal?: AbortSignal): Promise<ActionButtonContext> {
+  const currentUser = await fetchCurrentUserContext(signal);
   return compactContext({
     surface: "dashboard",
     currentUser: currentUser ?? undefined,
@@ -940,11 +1005,12 @@ function readEntryContextRoute(): EntryContextRoute {
   };
 }
 
-async function fetchEntryContextItem(collection: string, entryId: string) {
+async function fetchEntryContextItem(collection: string, entryId: string, signal?: AbortSignal) {
   try {
     const result = await parseApiResponse<{ item?: EntryContextItem }>(
       await apiFetch(
         `/_emdash/api/content/${encodeURIComponent(collection)}/${encodeURIComponent(entryId)}`,
+        { signal },
       ),
       "Failed to fetch entry context",
     );
@@ -954,10 +1020,10 @@ async function fetchEntryContextItem(collection: string, entryId: string) {
   }
 }
 
-async function fetchCurrentUserContext() {
+async function fetchCurrentUserContext(signal?: AbortSignal) {
   try {
     const user = await parseApiResponse<unknown>(
-      await apiFetch("/_emdash/api/auth/me"),
+      await apiFetch("/_emdash/api/auth/me", { signal }),
       "Failed to fetch current user",
     );
     const record = asRecord(user);
@@ -1106,15 +1172,19 @@ function positiveFieldNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-async function apiGet<T>(route: string): Promise<T> {
-  const response = await apiFetch(pluginRoute(route));
+async function apiGet<T>(route: string, signal?: AbortSignal): Promise<T> {
+  const response = await apiFetch(pluginRoute(route), { signal });
   return parseApiResponse<T>(response, "Failed to load actions");
 }
 
-async function callAction(action: UiAction, context: ActionButtonContext | undefined) {
+async function callAction(
+  action: UiAction,
+  context: ActionButtonContext | undefined,
+  signal?: AbortSignal,
+) {
   const method = action.method ?? "POST";
   const headers = new Headers();
-  const init: RequestInit = { headers, method };
+  const init: RequestInit = { headers, method, signal };
 
   if (hasJsonBody(method)) {
     const payload = mergeActionContextPayload(action.payload, action, context);
@@ -1126,8 +1196,14 @@ async function callAction(action: UiAction, context: ActionButtonContext | undef
   return parseApiResponse<unknown>(response, `Failed to run ${action.label}`);
 }
 
-async function pollActionStatus(action: UiAction, statusRoute: string): Promise<ActionRunResult> {
-  const response = await apiFetch(providerPluginRoute(action.targetPluginId, statusRoute));
+async function pollActionStatus(
+  action: UiAction,
+  statusRoute: string,
+  signal?: AbortSignal,
+): Promise<ActionRunResult> {
+  const response = await apiFetch(providerPluginRoute(action.targetPluginId, statusRoute), {
+    signal,
+  });
   const result = await parseApiResponse<unknown>(response, `Failed to poll ${action.label}`);
   return normalizeActionRunResult(action, result);
 }
@@ -1136,6 +1212,7 @@ async function waitForActionResult(
   action: UiAction,
   initialResult: ActionRunResult,
   onProgress: (result: ActionRunResult) => void,
+  signal?: AbortSignal,
 ): Promise<ActionRunResult> {
   let result = initialResult;
   let statusRoute = readStatusRoute(result);
@@ -1147,13 +1224,14 @@ async function waitForActionResult(
   let pollAtLeastOnce = action.resultMode === "emdash-action-accepted-v1";
 
   while (statusRoute && (pollAtLeastOnce || shouldContinuePolling(result))) {
+    throwIfAborted(signal);
     onProgress(result);
     if (Date.now() - startedAt > timeoutMs) {
       throw new Error(`${action.label} is still running. Check the provider job status.`);
     }
 
-    await sleep(pollDelayMs(action, result));
-    result = await pollActionStatus(action, statusRoute);
+    await sleep(pollDelayMs(action, result), signal);
+    result = await pollActionStatus(action, statusRoute, signal);
     statusRoute = readStatusRoute(result) ?? statusRoute;
     pollAtLeastOnce = false;
   }
@@ -1229,10 +1307,6 @@ function clampFeedbackMs(value: number) {
 
 function numberOrNull(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
 }
 
 function hasJsonBody(method: ActionMethod) {
