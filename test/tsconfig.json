@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "../test-dist",
+    "rootDir": "../src",
+    "verbatimModuleSyntax": false
+  },
+  "include": ["../src/busy-state.ts"]
+}

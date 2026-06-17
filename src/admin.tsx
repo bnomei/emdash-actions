@@ -20,6 +20,7 @@ import {
 } from "@phosphor-icons/react";
 import { apiFetch, parseApiResponse } from "emdash/plugin-utils";
 import { useEffect, useRef, useState } from "react";
+import { actionBusyKey, addBusyKey, isActionBusy, isActionDisabled, removeBusyKey } from "./busy-state";
 import type { CSSProperties, ReactNode } from "react";
 import {
   DEFAULT_MANIFEST_ROUTE,
@@ -210,7 +211,8 @@ function ActionsWidget(props: DashboardWidgetProps = {}) {
 
 function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const busyKeysRef = useRef<ReadonlySet<string>>(new Set());
   const [feedbackByKey, setFeedbackByKey] = useState<Record<string, ButtonFeedback>>({});
   const feedbackTimers = useRef<Record<string, FeedbackTimer>>({});
 
@@ -291,7 +293,10 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   async function runAction(action: UiAction) {
     if (action.confirm && !globalThis.confirm(action.confirm)) return;
 
-    setBusyKey(action.key);
+    if (isActionBusy(busyKeysRef.current, action.key)) return;
+
+    busyKeysRef.current = addBusyKey(busyKeysRef.current, action.key);
+    setBusyKeys(busyKeysRef.current);
     setActionFeedback(action, progressFeedbackForAction(action));
     try {
       const actionContext = await contextForAction(action, context, resolveDashboardContext);
@@ -330,7 +335,8 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         true,
       );
     } finally {
-      setBusyKey(null);
+      busyKeysRef.current = removeBusyKey(busyKeysRef.current, action.key);
+      setBusyKeys(busyKeysRef.current);
     }
   }
 
@@ -361,7 +367,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         <div style={actionListStyle}>
           {state.actions.map((action) => {
             const feedback = feedbackByKey[action.key] ?? null;
-            const isBusy = busyKey === action.key;
+            const isBusy = isActionBusy(busyKeys, action.key);
 
             return (
               <LayerCard key={action.key}>
@@ -382,7 +388,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
                     </div>
                     <Button
                       className={buttonClassName(feedback)}
-                      disabled={busyKey !== null || action.disabled === true}
+                      disabled={isActionDisabled(busyKeys, action.key, action.disabled === true)}
                       icon={buttonFeedbackIcon(action, feedback)}
                       loading={isBusy}
                       onClick={() => void runAction(action)}
@@ -676,7 +682,7 @@ async function loadProviderActions(response: ActionsProvidersResponse) {
       if (!matchesPlacement(action, response.placement)) continue;
       actions.push({
         ...action,
-        key: `${result.provider.pluginId}:${action.id}`,
+        key: actionBusyKey(result.provider.pluginId, action.id),
         provider: result.provider,
         targetPluginId: action.pluginId ?? result.provider.pluginId,
       });
