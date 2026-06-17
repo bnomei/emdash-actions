@@ -20,6 +20,7 @@ import {
 } from "@phosphor-icons/react";
 import { apiFetch, parseApiResponse } from "emdash/plugin-utils";
 import { useEffect, useRef, useState } from "react";
+import { actionBusyKey, addBusyKey, isActionBusy, isActionDisabled, removeBusyKey } from "./busy-state";
 import type { CSSProperties, ReactNode } from "react";
 import {
   DEFAULT_MANIFEST_ROUTE,
@@ -220,10 +221,11 @@ function ActionsWidget(props: DashboardWidgetProps = {}) {
 
 function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const busyKeysRef = useRef<ReadonlySet<string>>(new Set());
   const [feedbackByKey, setFeedbackByKey] = useState<Record<string, ButtonFeedback>>({});
   const feedbackTimers = useRef<Record<string, FeedbackTimer>>({});
-  const runAbortController = useRef<AbortController | null>(null);
+  const runAbortControllers = useRef<Record<string, AbortController>>({});
 
   useEffect(() => {
     const controller = new AbortController();
@@ -254,8 +256,10 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         globalThis.clearTimeout(timer);
       }
       feedbackTimers.current = {};
-      runAbortController.current?.abort();
-      runAbortController.current = null;
+      for (const controller of Object.values(runAbortControllers.current)) {
+        controller.abort();
+      }
+      runAbortControllers.current = {};
     };
   }, []);
 
@@ -306,11 +310,13 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   async function runAction(action: UiAction) {
     if (action.confirm && !confirmDestructiveAction(action.confirm)) return;
 
-    runAbortController.current?.abort();
-    const controller = new AbortController();
-    runAbortController.current = controller;
+    if (isActionBusy(busyKeysRef.current, action.key)) return;
 
-    setBusyKey(action.key);
+    runAbortControllers.current[action.key]?.abort();
+    const controller = new AbortController();
+    runAbortControllers.current[action.key] = controller;
+    busyKeysRef.current = addBusyKey(busyKeysRef.current, action.key);
+    setBusyKeys(busyKeysRef.current);
     setActionFeedback(action, progressFeedbackForAction(action));
     try {
       const actionContext = await contextForAction(
@@ -365,10 +371,11 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         );
       }
     } finally {
-      if (runAbortController.current === controller) {
-        runAbortController.current = null;
-        setBusyKey(null);
+      if (runAbortControllers.current[action.key] === controller) {
+        delete runAbortControllers.current[action.key];
       }
+      busyKeysRef.current = removeBusyKey(busyKeysRef.current, action.key);
+      setBusyKeys(busyKeysRef.current);
     }
   }
 
@@ -399,7 +406,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         <div style={actionListStyle}>
           {state.actions.map((action) => {
             const feedback = feedbackByKey[action.key] ?? null;
-            const isBusy = busyKey === action.key;
+            const isBusy = isActionBusy(busyKeys, action.key);
 
             return (
               <LayerCard key={action.key}>
@@ -420,7 +427,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
                     </div>
                     <Button
                       className={buttonClassName(feedback)}
-                      disabled={busyKey !== null || action.disabled === true}
+                      disabled={isActionDisabled(busyKeys, action.key, action.disabled === true)}
                       icon={buttonFeedbackIcon(action, feedback)}
                       loading={isBusy}
                       onClick={() => void runAction(action)}
@@ -740,7 +747,7 @@ async function loadProviderActions(response: ActionsProvidersResponse, signal?: 
       if (!matchesPlacement(action, response.placement)) continue;
       actions.push({
         ...action,
-        key: `${result.provider.pluginId}:${action.id}`,
+        key: actionBusyKey(result.provider.pluginId, action.id),
         provider: result.provider,
         targetPluginId: action.pluginId ?? result.provider.pluginId,
       });
