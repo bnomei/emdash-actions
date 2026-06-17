@@ -142,6 +142,15 @@ const MAX_FEEDBACK_COOLDOWN_MS = 60000;
 
 const actionToastManager = createKumoToastManager();
 
+type DestructiveActionConfirm = (message: string) => boolean;
+
+export function confirmDestructiveAction(
+  message: string | undefined,
+  confirm: DestructiveActionConfirm = globalThis.confirm.bind(globalThis),
+) {
+  return message ? confirm(message) : true;
+}
+
 const shellStyle = {
   display: "grid",
   gap: "0.85rem",
@@ -289,7 +298,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   }
 
   async function runAction(action: UiAction) {
-    if (action.confirm && !globalThis.confirm(action.confirm)) return;
+    if (action.confirm && !confirmDestructiveAction(action.confirm)) return;
 
     setBusyKey(action.key);
     setActionFeedback(action, progressFeedbackForAction(action));
@@ -530,7 +539,7 @@ function ActionButtonFieldContent({
     }
 
     if (!action) return;
-    if (action.confirm && !globalThis.confirm(action.confirm)) return;
+    if (action.confirm && !confirmDestructiveAction(action.confirm)) return;
 
     setBusy(true);
     setFieldFeedback(progressFeedbackForAction(action), false, action);
@@ -581,7 +590,7 @@ function ActionButtonFieldContent({
   }
 
   async function copyFieldClipboardValue() {
-    if (options?.confirm && !globalThis.confirm(options.confirm)) return;
+    if (options?.confirm && !confirmDestructiveAction(options.confirm)) return;
 
     setBusy(true);
     clearFieldFeedback();
