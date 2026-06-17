@@ -23,7 +23,7 @@ it exposes normal EmDash plugin API routes.
 ## Install
 
 ```sh
-vp install @bnomei/emdash-actions
+npm install @bnomei/emdash-actions
 ```
 
 ## Quick Start
@@ -346,8 +346,9 @@ The exported TypeScript contracts live in [src/types.ts](./src/types.ts).
 ## Development
 
 ```sh
-vp install
-vp run typecheck
-vp run build
-vp run pack:check
+npm ci
+npm run check
+npm run typecheck
+npm run build
+npm run pack:check
 ```
