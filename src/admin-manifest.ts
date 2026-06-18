@@ -13,6 +13,7 @@ import type {
   ActionTone,
   NormalizedActionProviderConfig,
 } from "./types";
+import type { LocalizedString } from "./i18n";
 
 const ACTION_METHODS = new Set<ActionMethod>(["POST", "PUT", "PATCH", "DELETE"]);
 const ACTION_BUTTON_MODES = new Set<ActionButtonMode>(["run", "clipboard"]);
@@ -61,14 +62,14 @@ function parseActionDescriptor(
 
   return {
     id: readRequiredString(record.id, "id"),
-    label: readRequiredString(record.label, "label"),
+    label: readRequiredLocalizedString(record.label, "label"),
     route: normalizePluginRoute(readRequiredString(record.route, "route")),
-    confirm: readOptionalString(record.confirm, "confirm"),
+    confirm: readOptionalLocalizedString(record.confirm, "confirm"),
     contextKey: readOptionalString(record.contextKey, "contextKey"),
     contextValueKey: readOptionalString(record.contextValueKey, "contextValueKey"),
     buttonStyle: readOptionalButtonStyle(record.buttonStyle, "buttonStyle"),
     cooldownMs: readOptionalNumber(record.cooldownMs, "cooldownMs"),
-    description: readOptionalString(record.description, "description"),
+    description: readOptionalLocalizedString(record.description, "description"),
     disabled: readOptionalBoolean(record.disabled, "disabled"),
     feedback: readOptionalFeedback(record.feedback, "feedback"),
     icon: readOptionalString(record.icon, "icon"),
@@ -107,7 +108,7 @@ export function providerFromFieldOptions(
       ? options.allowedTargetPluginIds
       : []
     ).map(normalizePluginId),
-    label: optionalFieldString(options?.providerLabel),
+    label: optionalFieldLocalizedString(options?.providerLabel),
     manifestRoute: normalizePluginRoute(
       optionalFieldString(options?.manifestRoute) ?? DEFAULT_MANIFEST_ROUTE,
     ),
@@ -121,6 +122,12 @@ export function readRequiredString(value: unknown, field: string) {
   return text;
 }
 
+export function readRequiredLocalizedString(value: unknown, field: string) {
+  const text = readOptionalLocalizedString(value, field);
+  if (!text) throw new Error(`Action ${field} is required`);
+  return text;
+}
+
 export function readOptionalString(value: unknown, field: string) {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") throw new Error(`Action ${field} must be a string`);
@@ -130,6 +137,27 @@ export function readOptionalString(value: unknown, field: string) {
     throw new Error(`Action ${field} must be ${MAX_STRING_LENGTH} characters or fewer`);
   }
   return text;
+}
+
+export function readOptionalLocalizedString(
+  value: unknown,
+  field: string,
+): LocalizedString | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return readOptionalString(value, field);
+
+  const record = asRecord(value);
+  if (!record) throw new Error(`Action ${field} must be a string or locale map`);
+
+  const localized: Record<string, string> = {};
+  for (const [locale, text] of Object.entries(record)) {
+    const normalizedLocale = locale.trim();
+    if (!normalizedLocale) throw new Error(`Action ${field} locale must not be empty`);
+    const normalizedText = readOptionalString(text, `${field}.${normalizedLocale}`);
+    if (normalizedText) localized[normalizedLocale] = normalizedText;
+  }
+
+  return Object.keys(localized).length > 0 ? localized : undefined;
 }
 
 function readMethod(value: unknown): ActionMethod | undefined {
@@ -202,6 +230,11 @@ export function readNullableString(value: unknown, field: string) {
   return readOptionalString(value, field);
 }
 
+export function readNullableLocalizedString(value: unknown, field: string) {
+  if (value === null) return null;
+  return readOptionalLocalizedString(value, field);
+}
+
 export function readOptionalButtonStyle(
   value: unknown,
   field: string,
@@ -240,9 +273,9 @@ export function readOptionalFeedback(
   if (!record) throw new Error(`Action ${field} must be an object`);
 
   const feedback: ActionFeedbackOptions = {};
-  const progress = readOptionalString(record.progress, `${field}.progress`);
-  const success = readOptionalString(record.success, `${field}.success`);
-  const error = readOptionalString(record.error, `${field}.error`);
+  const progress = readOptionalLocalizedString(record.progress, `${field}.progress`);
+  const success = readOptionalLocalizedString(record.success, `${field}.success`);
+  const error = readOptionalLocalizedString(record.error, `${field}.error`);
   const progressStyle = readOptionalButtonStyle(record.progressStyle, `${field}.progressStyle`);
   const successStyle = readOptionalButtonStyle(record.successStyle, `${field}.successStyle`);
   const errorStyle = readOptionalButtonStyle(record.errorStyle, `${field}.errorStyle`);
@@ -331,6 +364,20 @@ export function readOptionalFieldTone(value: unknown): ActionTone | undefined {
 
 export function optionalFieldString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+export function optionalFieldLocalizedString(value: unknown): LocalizedString | undefined {
+  if (typeof value === "string") return optionalFieldString(value);
+  const record = asRecord(value);
+  if (!record) return undefined;
+
+  const localized: Record<string, string> = {};
+  for (const [locale, text] of Object.entries(record)) {
+    if (typeof text === "string" && text.trim() && locale.trim()) {
+      localized[locale.trim()] = text.trim();
+    }
+  }
+  return Object.keys(localized).length > 0 ? localized : undefined;
 }
 
 export function positiveFieldNumber(value: unknown) {

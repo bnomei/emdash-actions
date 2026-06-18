@@ -71,6 +71,52 @@ describe("admin manifest parsing", () => {
     });
   });
 
+  it("accepts localized action and provider strings", () => {
+    const manifest = parseActionsManifest(
+      {
+        actions: [
+          {
+            id: "publish",
+            label: { en: "Publish", de: "Veroeffentlichen" },
+            route: "/jobs/publish",
+            confirm: { en: "Publish now?", de: "Jetzt veroeffentlichen?" },
+            description: { en: "Publishes the entry.", de: "Veroeffentlicht den Eintrag." },
+            feedback: {
+              progress: { en: "Publishing", de: "Veroeffentlicht" },
+              success: { en: "Published", de: "Veroeffentlicht" },
+            },
+          },
+        ],
+      },
+      provider,
+    );
+
+    expect(manifest.actions[0]?.label).toEqual({
+      de: "Veroeffentlichen",
+      en: "Publish",
+    });
+    expect(manifest.actions[0]?.confirm).toEqual({
+      de: "Jetzt veroeffentlichen?",
+      en: "Publish now?",
+    });
+    expect(manifest.actions[0]?.feedback?.progress).toEqual({
+      de: "Veroeffentlicht",
+      en: "Publishing",
+    });
+
+    expect(
+      providerFromFieldOptions({
+        pluginId: "source",
+        providerLabel: { en: "Source", de: "Quelle" },
+      }),
+    ).toEqual({
+      allowedTargetPluginIds: [],
+      label: { de: "Quelle", en: "Source" },
+      manifestRoute: ".well-known/actions",
+      pluginId: "source",
+    });
+  });
+
   it("rejects duplicate action ids and disallowed target plugin ids", () => {
     expect(() =>
       parseActionsManifest(

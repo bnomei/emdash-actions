@@ -1,3 +1,5 @@
+import type { ActionsI18nConfig, LocalizedString } from "./i18n";
+
 export type ActionMethod = "POST" | "PUT" | "PATCH" | "DELETE";
 export type ActionTone = "default" | "positive" | "warning" | "danger" | "info";
 export type ActionWidgetSize = "full" | "half" | "third";
@@ -43,8 +45,10 @@ export interface ActionButtonContext {
     [key: string]: unknown;
   };
   i18n?: {
+    locale?: string;
     defaultLocale?: string;
     locales?: string[];
+    fallback?: Record<string, string>;
     [key: string]: unknown;
   };
   translations?: unknown[];
@@ -63,21 +67,21 @@ export interface ActionButtonStyle {
 }
 
 export interface ActionFeedbackOptions {
-  progress?: string;
-  success?: string;
-  error?: string;
+  progress?: LocalizedString;
+  success?: LocalizedString;
+  error?: LocalizedString;
   progressStyle?: ActionButtonStyle;
   successStyle?: ActionButtonStyle;
   errorStyle?: ActionButtonStyle;
 }
 
 export interface ActionResultActionPatch {
-  label?: string;
+  label?: LocalizedString;
   icon?: string | null;
   tone?: ActionTone | null;
-  description?: string | null;
+  description?: LocalizedString | null;
   disabled?: boolean;
-  confirm?: string | null;
+  confirm?: LocalizedString | null;
   payload?: Record<string, unknown> | null;
 }
 
@@ -90,15 +94,15 @@ export interface ActionResultEffects {
 
 export interface ActionToast {
   type?: ActionToastType;
-  title?: string;
-  message?: string;
+  title?: LocalizedString;
+  message?: LocalizedString;
   id?: string;
   timeoutMs?: number;
 }
 
 export interface ActionProviderConfig {
   pluginId: string;
-  label?: string;
+  label?: LocalizedString;
   manifestRoute?: string;
   allowedTargetPluginIds?: string[];
 }
@@ -110,14 +114,14 @@ export interface NormalizedActionProviderConfig extends ActionProviderConfig {
 
 export interface ActionDescriptor {
   id: string;
-  label: string;
+  label: LocalizedString;
   route: string;
   method?: ActionMethod;
   pluginId?: string;
-  description?: string;
+  description?: LocalizedString;
   icon?: string;
   tone?: ActionTone;
-  confirm?: string;
+  confirm?: LocalizedString;
   placement?: string;
   resultMode?: ActionResultMode | (string & {});
   payload?: Record<string, unknown>;
@@ -136,15 +140,15 @@ export interface ActionButtonFieldOptions {
   mode?: ActionButtonMode;
   provider?: string;
   pluginId?: string;
-  providerLabel?: string;
+  providerLabel?: LocalizedString;
   action?: string;
   route?: string;
   method?: ActionMethod;
-  label?: string;
-  description?: string;
+  label?: LocalizedString;
+  description?: LocalizedString;
   icon?: string;
   tone?: ActionTone;
-  confirm?: string;
+  confirm?: LocalizedString;
   placement?: string;
   manifestRoute?: string;
   allowedTargetPluginIds?: string[];
@@ -156,7 +160,7 @@ export interface ActionButtonFieldOptions {
   clipboardText?: string;
   clipboardValueKey?: string;
   clipboardContextValueKey?: string;
-  clipboardSuccess?: string;
+  clipboardSuccess?: LocalizedString;
   disabled?: boolean;
   cooldownMs?: number;
   buttonStyle?: ActionButtonStyle;
@@ -164,6 +168,7 @@ export interface ActionButtonFieldOptions {
   resultEffect?: ActionResultEffectPreset;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
+  i18n?: ActionsI18nConfig;
 }
 
 export interface ActionsManifest {
@@ -173,6 +178,7 @@ export interface ActionsManifest {
 export interface ActionsProvidersResponse {
   placement: string | null;
   providers: NormalizedActionProviderConfig[];
+  i18n?: ActionsI18nConfig;
 }
 
 export interface ActionRunResult {
@@ -214,6 +220,7 @@ export interface ActionsDescriptorOptions {
   placement?: string | null;
   title?: string;
   size?: ActionWidgetSize;
+  i18n?: ActionsI18nConfig;
 }
 
 export interface ActionsCreatePluginOptions {
@@ -222,4 +229,5 @@ export interface ActionsCreatePluginOptions {
   placement?: string | null;
   title?: string;
   size?: ActionWidgetSize;
+  i18n?: ActionsI18nConfig;
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 - 2026-06-18
+
+- Added EmDash-shaped `i18n` options with `locale`, `defaultLocale`,
+  `locales`, `fallback`, and `messages` for action UI copy.
+- Added localized string support for action/provider labels, descriptions,
+  confirmations, feedback messages, action patches, and toasts.
+- Exported the default action i18n catalog, message keys, and resolver helpers.
+
 ## 0.2.5 - 2026-06-18
 
 - Fixed the exported plugin version metadata so EmDash reports the current package version.

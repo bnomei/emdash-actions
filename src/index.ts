@@ -10,6 +10,7 @@ import {
   pluginRoute,
   providerPluginRoute,
 } from "./shared";
+import { actionMessage, type ActionsI18nConfig } from "./i18n";
 import type {
   ActionDescriptor,
   ActionProviderConfig,
@@ -21,6 +22,20 @@ import type {
   NormalizedActionProviderConfig,
 } from "./types";
 
+export type {
+  ActionsI18nConfig,
+  ActionsI18nMessages,
+  ActionsMessageKey,
+  LocalizedString,
+} from "./i18n";
+export {
+  DEFAULT_ACTIONS_I18N,
+  DEFAULT_LOCALE,
+  actionMessage,
+  formatActionMessage,
+  localeFallbacks,
+  localizedString,
+} from "./i18n";
 export type {
   ActionButtonMode,
   ActionButtonStyle,
@@ -79,6 +94,7 @@ export function actionsPlugin(
       providers: options.providers ?? [],
       size: options.size,
       title: options.title,
+      i18n: options.i18n,
     },
   };
 }
@@ -99,7 +115,7 @@ export function createPlugin(options: ActionsCreatePluginOptions = {}) {
       fieldWidgets: [
         {
           fieldTypes: ["json", "string", "text", "url"],
-          label: "Action Button",
+          label: actionMessage("actionButton", options.i18n),
           name: "button",
         },
       ],
@@ -109,11 +125,12 @@ export function createPlugin(options: ActionsCreatePluginOptions = {}) {
 }
 
 export function providersRoute(
-  options: Pick<ActionsCreatePluginOptions, "providers" | "placement">,
+  options: Pick<ActionsCreatePluginOptions, "providers" | "placement" | "i18n">,
 ) {
   return {
     placement: options.placement === undefined ? "dashboard" : options.placement,
     providers: normalizeProviders(options.providers),
+    i18n: "i18n" in options ? options.i18n : undefined,
   } satisfies ActionsProvidersResponse;
 }
 
@@ -144,11 +161,15 @@ export function defineActionsManifest(manifest: ActionsManifest): ActionsManifes
   return manifest;
 }
 
-function widgetMetadata(options: { size?: ActionWidgetSize; title?: string }) {
+function widgetMetadata(options: {
+  size?: ActionWidgetSize;
+  title?: string;
+  i18n?: ActionsI18nConfig;
+}) {
   return {
     id: WIDGET_ID,
     size: options.size ?? "half",
-    title: options.title ?? "Actions",
+    title: options.title ?? actionMessage("actions", options.i18n),
   };
 }
 

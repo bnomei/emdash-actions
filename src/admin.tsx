@@ -20,6 +20,7 @@ import {
 } from "@phosphor-icons/react";
 import { apiFetch, parseApiResponse } from "emdash/plugin-utils";
 import { useEffect, useRef, useState } from "react";
+import { useAdminLocale } from "./admin-locale";
 import {
   contextForAction,
   mergeActionContextPayload,
@@ -43,6 +44,7 @@ import {
   errorMessage,
   hasJsonBody,
   numberOrNull,
+  optionalFieldLocalizedString,
   optionalFieldString,
   parseActionsManifest,
   positiveFieldNumber,
@@ -74,6 +76,12 @@ import {
 import type { CSSProperties, ReactNode } from "react";
 import { PLUGIN_ID, WIDGET_ID, pluginRoute, providerPluginRoute } from "./shared";
 import { isAbortError, throwIfAborted } from "./admin-cancellation";
+import {
+  actionMessage,
+  formatActionMessage,
+  localizedString,
+  type ActionsI18nConfig,
+} from "./i18n";
 import type {
   ActionButtonMode,
   ActionButtonStyle,
@@ -93,7 +101,12 @@ import type {
 type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; actions: UiAction[]; errors: ProviderError[] };
+  | {
+      status: "ready";
+      actions: UiAction[];
+      errors: ProviderError[];
+      i18n?: ActionsI18nConfig;
+    };
 
 type UiAction = ActionDescriptor & {
   key: string;
@@ -198,6 +211,53 @@ const fieldHeaderStyle = {
   minWidth: 0,
 } satisfies CSSProperties;
 
+function contextI18n(context: ActionButtonContext | undefined): ActionsI18nConfig | undefined {
+  const config = context?.i18n;
+  if (!config) return undefined;
+  return {
+    defaultLocale: typeof config.defaultLocale === "string" ? config.defaultLocale : undefined,
+    fallback: config.fallback,
+    locale:
+      typeof context.entryLocale === "string" && context.entryLocale
+        ? context.entryLocale
+        : typeof config.locale === "string"
+          ? config.locale
+          : undefined,
+    locales: Array.isArray(config.locales)
+      ? config.locales.filter((locale): locale is string => typeof locale === "string")
+      : undefined,
+  };
+}
+
+function mergeI18n(
+  ...configs: Array<ActionsI18nConfig | undefined>
+): ActionsI18nConfig | undefined {
+  let merged: ActionsI18nConfig | undefined;
+  for (const config of configs) {
+    if (!config) continue;
+    merged = {
+      ...merged,
+      ...config,
+      fallback: { ...merged?.fallback, ...config.fallback },
+      messages: { ...merged?.messages, ...config.messages },
+    };
+  }
+  return merged;
+}
+
+function useActionI18n(i18n: ActionsI18nConfig | undefined): ActionsI18nConfig {
+  const locale = useAdminLocale(i18n?.locale ?? i18n?.defaultLocale);
+  return { ...i18n, locale };
+}
+
+function actionLabel(action: Pick<ActionDescriptor, "id" | "label">, i18n: ActionsI18nConfig) {
+  return localizedString(action.label, i18n, action.id);
+}
+
+function actionDescription(action: Pick<ActionDescriptor, "description">, i18n: ActionsI18nConfig) {
+  return localizedString(action.description, i18n);
+}
+
 function ActionRuntimeShell({ children }: { children: ReactNode }) {
   return <Toasty toastManager={actionToastManager}>{children}</Toasty>;
 }
@@ -217,6 +277,8 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   const [feedbackByKey, setFeedbackByKey] = useState<Record<string, ButtonFeedback>>({});
   const feedbackTimers = useRef<Record<string, FeedbackTimer>>({});
   const runAbortControllers = useRef<Record<string, AbortController>>({});
+  const responseI18n = state.status === "ready" ? state.i18n : undefined;
+  const i18n = useActionI18n(mergeI18n(contextI18n(context), responseI18n));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -227,7 +289,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         const providers = await apiGet<ActionsProvidersResponse>("providers", controller.signal);
         const result = await loadProviderActions(providers, controller.signal);
         if (!active) return;
-        setState({ status: "ready", ...result });
+        setState({ status: "ready", ...result, i18n: providers.i18n });
       } catch (error) {
         if (!active || isAbortError(error)) return;
         setState({ status: "error", message: errorMessage(error) });
@@ -299,7 +361,9 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   }
 
   async function runAction(action: UiAction) {
-    if (action.confirm && !confirmDestructiveAction(action.confirm)) return;
+    const label = actionLabel(action, i18n);
+    const confirmMessage = localizedString(action.confirm, i18n);
+    if (confirmMessage && !confirmDestructiveAction(confirmMessage)) return;
 
     if (isActionBusy(busyKeysRef.current, action.key)) return;
 
@@ -308,7 +372,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
     runAbortControllers.current[action.key] = controller;
     busyKeysRef.current = addBusyKey(busyKeysRef.current, action.key);
     setBusyKeys(busyKeysRef.current);
-    setActionFeedback(action, progressFeedbackForAction(action));
+    setActionFeedback(action, progressFeedbackForAction(action, i18n));
     try {
       const actionContext = await contextForAction(
         action,
@@ -319,18 +383,19 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
       throwIfAborted(controller.signal);
       const result = normalizeActionRunResult(
         action,
-        await callAction(action, actionContext, controller.signal),
+        await callAction(action, actionContext, controller.signal, i18n),
       );
       const finalResult = await waitForActionResult(
         action,
         result,
         (progress) => {
-          setActionFeedback(action, feedbackFromResult(action, progress));
+          setActionFeedback(action, feedbackFromResult(action, progress, i18n));
         },
-        pollActionStatus,
+        (nextAction, statusRoute, signal) =>
+          pollActionStatus(nextAction, statusRoute, signal, i18n),
         controller.signal,
       );
-      showActionToasts(finalResult);
+      showActionToasts(finalResult, i18n);
       if (isSuccessfulTerminalResult(finalResult)) {
         const updated = applyActionUpdate(action, finalResult);
         await runActionEffects(action, finalResult);
@@ -339,7 +404,12 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         } else {
           setActionFeedback(
             action,
-            feedbackFromResult(action, finalResult, `${action.label} finished.`),
+            feedbackFromResult(
+              action,
+              finalResult,
+              i18n,
+              formatActionMessage("actionFinished", i18n, { action: label }),
+            ),
             true,
           );
         }
@@ -349,7 +419,10 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
           feedbackFromResult(
             action,
             finalResult,
-            isErrorResult(finalResult) ? `${action.label} failed.` : `${action.label} is running.`,
+            i18n,
+            isErrorResult(finalResult)
+              ? formatActionMessage("actionFailed", i18n, { action: label })
+              : formatActionMessage("actionRunning", i18n, { action: label }),
           ),
           true,
         );
@@ -377,7 +450,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         <div style={loadingStyle}>
           <Loader size="sm" />
           <Text size="sm" variant="secondary">
-            Loading actions...
+            {actionMessage("loadingActions", i18n)}
           </Text>
         </div>
       </WidgetShell>
@@ -406,15 +479,15 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
                   <div style={actionRowContentStyle}>
                     <div style={actionHeaderStyle}>
                       <div style={actionTextStyle}>
-                        <Text size="sm">{action.label}</Text>
-                        {action.description ? (
+                        <Text size="sm">{actionLabel(action, i18n)}</Text>
+                        {actionDescription(action, i18n) ? (
                           <Text size="xs" variant="secondary">
-                            {action.description}
+                            {actionDescription(action, i18n)}
                           </Text>
                         ) : null}
                       </div>
                       <Badge variant="secondary">
-                        {action.provider.label ?? action.provider.pluginId}
+                        {localizedString(action.provider.label, i18n, action.provider.pluginId)}
                       </Badge>
                     </div>
                     <Button
@@ -428,7 +501,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
                       type="button"
                       variant={buttonVariant(feedback?.tone ?? action.tone, feedback)}
                     >
-                      {feedback?.message ?? action.label}
+                      {feedback?.message ?? actionLabel(action, i18n)}
                     </Button>
                   </div>
                 </LayerCard.Primary>
@@ -438,10 +511,10 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         </div>
       ) : (
         <Empty
-          description="Configure at least one provider to show action buttons."
+          description={actionMessage("noActionsConfiguredDescription", i18n)}
           icon={<LightningIcon size={32} />}
           size="sm"
-          title="No actions configured"
+          title={actionMessage("noActionsConfiguredTitle", i18n)}
         />
       )}
 
@@ -449,7 +522,8 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         <div style={footerStyle}>
           {state.errors.map((error) => (
             <Text key={error.provider.pluginId} size="xs" variant="error">
-              {error.provider.label ?? error.provider.pluginId}: {error.message}
+              {localizedString(error.provider.label, i18n, error.provider.pluginId)}:{" "}
+              {error.message}
             </Text>
           ))}
         </div>
@@ -487,6 +561,7 @@ function ActionButtonFieldContent({
   const [feedback, setFeedback] = useState<ButtonFeedback>(null);
   const feedbackTimer = useRef<FeedbackTimer | null>(null);
   const runAbortController = useRef<AbortController | null>(null);
+  const i18n = useActionI18n(mergeI18n(contextI18n(context), options?.i18n));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -504,7 +579,7 @@ function ActionButtonFieldContent({
           return;
         }
 
-        const resolved = await resolveFieldAction(options, value, label, controller.signal);
+        const resolved = await resolveFieldAction(options, value, label, controller.signal, i18n);
         if (!active) return;
         setAction(resolved);
         setError(null);
@@ -572,14 +647,16 @@ function ActionButtonFieldContent({
     }
 
     if (!action) return;
-    if (action.confirm && !confirmDestructiveAction(action.confirm)) return;
+    const actionDisplayLabel = actionLabel(action, i18n);
+    const confirmMessage = localizedString(action.confirm, i18n);
+    if (confirmMessage && !confirmDestructiveAction(confirmMessage)) return;
 
     runAbortController.current?.abort();
     const controller = new AbortController();
     runAbortController.current = controller;
 
     setBusy(true);
-    setFieldFeedback(progressFeedbackForAction(action), false, action);
+    setFieldFeedback(progressFeedbackForAction(action, i18n), false, action);
     setError(null);
     try {
       const actionContext = await contextForAction(
@@ -591,18 +668,19 @@ function ActionButtonFieldContent({
       throwIfAborted(controller.signal);
       const result = normalizeActionRunResult(
         action,
-        await callAction(action, actionContext, controller.signal),
+        await callAction(action, actionContext, controller.signal, i18n),
       );
       const finalResult = await waitForActionResult(
         action,
         result,
         (progress) => {
-          setFieldFeedback(feedbackFromResult(action, progress), false, action);
+          setFieldFeedback(feedbackFromResult(action, progress, i18n), false, action);
         },
-        pollActionStatus,
+        (nextAction, statusRoute, signal) =>
+          pollActionStatus(nextAction, statusRoute, signal, i18n),
         controller.signal,
       );
-      showActionToasts(finalResult);
+      showActionToasts(finalResult, i18n);
       if (isSuccessfulTerminalResult(finalResult)) {
         const patchedAction = mergeActionResultPatch(action, finalResult);
         if (patchedAction) setAction(patchedAction);
@@ -612,7 +690,12 @@ function ActionButtonFieldContent({
           clearFieldFeedback();
         } else {
           setFieldFeedback(
-            feedbackFromResult(action, finalResult, `${action.label} finished.`),
+            feedbackFromResult(
+              action,
+              finalResult,
+              i18n,
+              formatActionMessage("actionFinished", i18n, { action: actionDisplayLabel }),
+            ),
             true,
             action,
           );
@@ -622,7 +705,10 @@ function ActionButtonFieldContent({
           feedbackFromResult(
             action,
             finalResult,
-            isErrorResult(finalResult) ? `${action.label} failed.` : `${action.label} is running.`,
+            i18n,
+            isErrorResult(finalResult)
+              ? formatActionMessage("actionFailed", i18n, { action: actionDisplayLabel })
+              : formatActionMessage("actionRunning", i18n, { action: actionDisplayLabel }),
           ),
           true,
           action,
@@ -645,7 +731,8 @@ function ActionButtonFieldContent({
   }
 
   async function copyFieldClipboardValue() {
-    if (options?.confirm && !confirmDestructiveAction(options.confirm)) return;
+    const confirmMessage = localizedString(options?.confirm, i18n);
+    if (confirmMessage && !confirmDestructiveAction(confirmMessage)) return;
 
     setBusy(true);
     clearFieldFeedback();
@@ -660,7 +747,9 @@ function ActionButtonFieldContent({
         {
           phase: "success",
           tone: "success",
-          message: optionalFieldString(options?.clipboardSuccess) ?? "Copied to clipboard.",
+          message:
+            localizedString(optionalFieldLocalizedString(options?.clipboardSuccess), i18n) ||
+            actionMessage("copiedToClipboard", i18n),
         },
         true,
         options ?? null,
@@ -676,8 +765,13 @@ function ActionButtonFieldContent({
     }
   }
 
-  const buttonLabel = options?.label ?? action?.label ?? label ?? fieldDefaultButtonLabel(mode);
-  const description = options?.description ?? action?.description;
+  const buttonLabel =
+    localizedString(options?.label, i18n) ||
+    (action ? actionLabel(action, i18n) : "") ||
+    label ||
+    fieldDefaultButtonLabel(mode, i18n);
+  const description =
+    localizedString(options?.description, i18n) || (action ? actionDescription(action, i18n) : "");
   const disabled = busy || options?.disabled === true || (mode === "run" && !action);
 
   return (
@@ -719,7 +813,7 @@ async function loadProviderActions(response: ActionsProvidersResponse, signal?: 
   const results = await Promise.all(
     response.providers.map(async (provider) => {
       try {
-        const manifest = await fetchManifest(provider, signal);
+        const manifest = await fetchManifest(provider, signal, response.i18n);
         return { manifest, provider };
       } catch (error) {
         return { error: errorMessage(error), provider };
@@ -732,7 +826,10 @@ async function loadProviderActions(response: ActionsProvidersResponse, signal?: 
 
   for (const result of results) {
     if ("error" in result) {
-      errors.push({ provider: result.provider, message: result.error ?? "Failed to load actions" });
+      errors.push({
+        provider: result.provider,
+        message: result.error ?? actionMessage("failedToLoadActions", response.i18n),
+      });
       continue;
     }
 
@@ -753,13 +850,14 @@ async function loadProviderActions(response: ActionsProvidersResponse, signal?: 
 async function fetchManifest(
   provider: NormalizedActionProviderConfig,
   signal?: AbortSignal,
+  i18n?: ActionsI18nConfig,
 ): Promise<ActionsManifest> {
   const response = await apiFetch(providerPluginRoute(provider.pluginId, provider.manifestRoute), {
     signal,
   });
   const manifest = await parseApiResponse<unknown>(
     response,
-    `Failed to load ${provider.pluginId} actions`,
+    formatActionMessage("failedToLoadActions", i18n, { provider: provider.pluginId }),
   );
   return parseActionsManifest(manifest, provider);
 }
@@ -769,6 +867,7 @@ async function resolveFieldAction(
   value: unknown,
   label: string | undefined,
   signal?: AbortSignal,
+  i18n?: ActionsI18nConfig,
 ): Promise<UiAction> {
   const provider = fieldProvider(options);
   const route = optionalFieldString(options?.route);
@@ -776,14 +875,15 @@ async function resolveFieldAction(
   if (route) {
     return fieldActionFromDescriptor(
       {
-        confirm: optionalFieldString(options?.confirm),
+        confirm: optionalFieldLocalizedString(options?.confirm),
         contextKey: optionalFieldString(options?.contextKey),
         contextValueKey: optionalFieldString(options?.contextValueKey),
-        description: optionalFieldString(options?.description),
+        description: optionalFieldLocalizedString(options?.description),
         disabled: options?.disabled,
         icon: optionalFieldString(options?.icon),
         id: optionalFieldString(options?.action) ?? `field.${provider.pluginId}.${route}`,
-        label: optionalFieldString(options?.label) ?? label ?? "Run action",
+        label:
+          optionalFieldLocalizedString(options?.label) ?? label ?? actionMessage("runAction", i18n),
         method: readFieldMethod(options?.method),
         payload: mergeFieldPayload(undefined, options, value),
         placement: optionalFieldString(options?.placement) ?? "field",
@@ -805,7 +905,7 @@ async function resolveFieldAction(
     throw new Error("Action button field requires either options.action or options.route");
   }
 
-  const manifest = await fetchManifest(provider, signal);
+  const manifest = await fetchManifest(provider, signal, i18n);
   const placement = optionalFieldString(options?.placement) ?? "field";
   const action = manifest.actions.find(
     (candidate) => candidate.id === actionId && matchesPlacement(candidate, placement),
@@ -818,15 +918,15 @@ async function resolveFieldAction(
   return fieldActionFromDescriptor(
     {
       ...action,
-      confirm: optionalFieldString(options?.confirm) ?? action.confirm,
+      confirm: optionalFieldLocalizedString(options?.confirm) ?? action.confirm,
       contextKey: optionalFieldString(options?.contextKey) ?? action.contextKey,
       contextValueKey: optionalFieldString(options?.contextValueKey) ?? action.contextValueKey,
-      description: optionalFieldString(options?.description) ?? action.description,
+      description: optionalFieldLocalizedString(options?.description) ?? action.description,
       disabled: options?.disabled ?? action.disabled,
       buttonStyle:
         readOptionalButtonStyle(options?.buttonStyle, "buttonStyle") ?? action.buttonStyle,
       feedback: readOptionalFeedback(options?.feedback, "feedback") ?? action.feedback,
-      label: optionalFieldString(options?.label) ?? action.label,
+      label: optionalFieldLocalizedString(options?.label) ?? action.label,
       payload: mergeFieldPayload(action.payload, options, value),
       cooldownMs: positiveFieldNumber(options?.cooldownMs) ?? action.cooldownMs,
       pollIntervalMs: positiveFieldNumber(options?.pollIntervalMs) ?? action.pollIntervalMs,
@@ -919,14 +1019,16 @@ function stringifyClipboardValue(value: unknown) {
 
 async function apiGet<T>(route: string, signal?: AbortSignal): Promise<T> {
   const response = await apiFetch(pluginRoute(route), { signal });
-  return parseApiResponse<T>(response, "Failed to load actions");
+  return parseApiResponse<T>(response, actionMessage("failedToLoadActions", undefined));
 }
 
 async function callAction(
   action: UiAction,
   context: ActionButtonContext | undefined,
   signal?: AbortSignal,
+  i18n?: ActionsI18nConfig,
 ) {
+  const label = actionLabel(action, i18n ?? {});
   const method = action.method ?? "POST";
   const headers = new Headers();
   const init: RequestInit = { headers, method, signal };
@@ -938,30 +1040,37 @@ async function callAction(
   }
 
   const response = await apiFetch(providerPluginRoute(action.targetPluginId, action.route), init);
-  return parseApiResponse<unknown>(response, `Failed to run ${action.label}`);
+  return parseApiResponse<unknown>(
+    response,
+    formatActionMessage("failedToRunAction", i18n, { action: label }),
+  );
 }
 
 async function pollActionStatus(
   action: UiAction,
   statusRoute: string,
   signal?: AbortSignal,
+  i18n?: ActionsI18nConfig,
 ): Promise<ActionRunResult> {
   const response = await apiFetch(providerPluginRoute(action.targetPluginId, statusRoute), {
     signal,
   });
-  const result = await parseApiResponse<unknown>(response, `Failed to poll ${action.label}`);
+  const result = await parseApiResponse<unknown>(
+    response,
+    formatActionMessage("failedToPollAction", i18n, { action: actionLabel(action, i18n ?? {}) }),
+  );
   return normalizeActionRunResult(action, result);
 }
 
-function showActionToasts(result: ActionRunResult) {
+function showActionToasts(result: ActionRunResult, i18n: ActionsI18nConfig) {
   for (const toast of actionToasts(result)) {
-    const title = cleanOptionalString(toast.title);
-    const message = cleanOptionalString(toast.message);
+    const title = localizedString(toast.title, i18n);
+    const message = localizedString(toast.message, i18n);
     if (!title && !message) continue;
 
     actionToastManager.add({
       id: cleanOptionalString(toast.id),
-      title: title ?? message ?? "Action finished",
+      title: title || message || actionMessage("actionFinished", i18n),
       description: message && message !== title ? message : undefined,
       timeout: numberOrNull(toast.timeoutMs) ?? undefined,
       variant: toastVariant(toast.type),
@@ -1134,8 +1243,8 @@ function fieldIcon(icon: string | undefined) {
   return <PlayIcon weight="bold" />;
 }
 
-function fieldDefaultButtonLabel(mode: ActionButtonMode) {
-  return mode === "clipboard" ? "Copy" : "Run action";
+function fieldDefaultButtonLabel(mode: ActionButtonMode, i18n: ActionsI18nConfig) {
+  return mode === "clipboard" ? actionMessage("copy", i18n) : actionMessage("runAction", i18n);
 }
 
 function feedbackIcon(tone: NoticeTone) {
@@ -1148,22 +1257,30 @@ function feedbackIcon(tone: NoticeTone) {
 function feedbackFromResult(
   action: ActionDescriptor,
   result: ActionRunResult,
-  fallbackMessage = `${action.label} is running.`,
+  i18n: ActionsI18nConfig,
+  fallbackMessage = formatActionMessage("actionRunning", i18n, {
+    action: actionLabel(action, i18n),
+  }),
 ): ButtonFeedback {
   const phase = resultPhase(result);
   return {
     phase,
     tone: resultTone(result),
-    message: resultMessage(action, result, phase, fallbackMessage),
+    message: resultMessage(action, result, phase, fallbackMessage, i18n),
     style: resultFeedbackStyle(action, result, phase),
   };
 }
 
-function progressFeedbackForAction(action: ActionDescriptor): ButtonFeedback {
+function progressFeedbackForAction(
+  action: ActionDescriptor,
+  i18n: ActionsI18nConfig,
+): ButtonFeedback {
   return {
     phase: "progress",
     tone: "info",
-    message: action.feedback?.progress ?? `${action.label} is running.`,
+    message:
+      localizedString(action.feedback?.progress, i18n) ||
+      formatActionMessage("actionRunning", i18n, { action: actionLabel(action, i18n) }),
     style: action.feedback?.progressStyle,
   };
 }
@@ -1179,23 +1296,23 @@ function resultMessage(
   result: ActionRunResult,
   phase: "progress" | "success" | "error",
   fallbackMessage: string,
+  i18n: ActionsI18nConfig,
 ) {
   const phaseMessage =
     phase === "progress"
-      ? action.feedback?.progress
+      ? localizedString(action.feedback?.progress, i18n)
       : phase === "error"
-        ? (cleanOptionalString(result.error) ?? action.feedback?.error)
-        : (cleanOptionalString(result.success) ?? action.feedback?.success);
+        ? (cleanOptionalString(result.error) ?? localizedString(action.feedback?.error, i18n))
+        : (cleanOptionalString(result.success) ?? localizedString(action.feedback?.success, i18n));
 
+  const notificationMessage = localizedString(inlineNotification(result)?.message, i18n);
+  const directMessage = cleanOptionalString(result.message);
+  const resultLabel = cleanOptionalString(result.label);
   const base =
-    cleanOptionalString(result.message) ??
-    cleanOptionalString(inlineNotification(result)?.message) ??
-    phaseMessage ??
-    cleanOptionalString(result.label) ??
-    fallbackMessage;
+    directMessage ?? (notificationMessage || phaseMessage || resultLabel || fallbackMessage);
   const progress = progressLabel(result.progress);
   const jobStatus = readJobStatus(result) as ActionJobStatus | null;
-  const prefix = jobStatus ? jobStatusLabel(jobStatus) : null;
+  const prefix = jobStatus ? jobStatusLabel(jobStatus, i18n) : null;
   const message =
     prefix && !base.toLowerCase().startsWith(prefix.toLowerCase()) ? `${prefix}: ${base}` : base;
 
@@ -1238,13 +1355,13 @@ function resultFeedbackStyle(
     : configured;
 }
 
-function jobStatusLabel(status: ActionJobStatus | string) {
-  if (status === "accepted") return "Accepted";
-  if (status === "queued") return "Queued";
-  if (status === "running") return "Running";
-  if (status === "succeeded") return "Finished";
-  if (status === "failed") return "Failed";
-  if (status === "cancelled") return "Cancelled";
+function jobStatusLabel(status: ActionJobStatus | string, i18n: ActionsI18nConfig) {
+  if (status === "accepted") return actionMessage("statusAccepted", i18n);
+  if (status === "queued") return actionMessage("statusQueued", i18n);
+  if (status === "running") return actionMessage("statusRunning", i18n);
+  if (status === "succeeded") return actionMessage("statusFinished", i18n);
+  if (status === "failed") return actionMessage("statusFailed", i18n);
+  if (status === "cancelled") return actionMessage("statusCancelled", i18n);
   return status;
 }
 

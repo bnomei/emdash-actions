@@ -2,6 +2,7 @@ import { normalizePluginRoute } from "./shared";
 import { sleep as defaultSleep, throwIfAborted } from "./admin-cancellation";
 import { numberOrNull } from "./admin-manifest";
 import type { ActionDescriptor, ActionRunResult } from "./types";
+import { localizedString } from "./i18n";
 
 const PENDING_JOB_STATUSES = new Set<string>(["accepted", "queued", "running"]);
 const FAILED_JOB_STATUSES = new Set<string>(["failed", "cancelled"]);
@@ -45,7 +46,9 @@ export async function waitForActionResult<TAction extends ActionDescriptor>(
     throwIfAborted(signal);
     onProgress(result);
     if (now() - startedAt > timeoutMs) {
-      throw new Error(`${action.label} is still running. Check the provider job status.`);
+      throw new Error(
+        `${localizedString(action.label, undefined, action.id)} is still running. Check the provider job status.`,
+      );
     }
 
     await sleep(pollDelayMs(action, result), signal);

@@ -1,16 +1,18 @@
 import { apiFetch } from "emdash/plugin-utils";
+import { localizedString } from "./i18n";
 import { providerPluginRoute, normalizePluginRoute } from "./shared";
 import {
   asRecord,
   cleanOptionalString,
   numberOrNull,
   readNullablePayload,
+  readNullableLocalizedString,
   readNullableString,
   readNullableTone,
   readOpenTarget,
   readOptionalBoolean,
   readOptionalNumber,
-  readRequiredString,
+  readRequiredLocalizedString,
 } from "./admin-manifest";
 import type {
   ActionDescriptor,
@@ -109,17 +111,19 @@ export function actionPatchFromResult(result: ActionRunResult): ActionResultActi
   if (!patch) return null;
 
   const next: ActionResultActionPatch = {};
-  if (Object.hasOwn(patch, "label")) next.label = readRequiredString(patch.label, "action.label");
+  if (Object.hasOwn(patch, "label")) {
+    next.label = readRequiredLocalizedString(patch.label, "action.label");
+  }
   if (Object.hasOwn(patch, "icon")) next.icon = readNullableString(patch.icon, "action.icon");
   if (Object.hasOwn(patch, "tone")) next.tone = readNullableTone(patch.tone, "action.tone");
   if (Object.hasOwn(patch, "description")) {
-    next.description = readNullableString(patch.description, "action.description");
+    next.description = readNullableLocalizedString(patch.description, "action.description");
   }
   if (Object.hasOwn(patch, "disabled")) {
     next.disabled = readOptionalBoolean(patch.disabled, "action.disabled") ?? false;
   }
   if (Object.hasOwn(patch, "confirm")) {
-    next.confirm = readNullableString(patch.confirm, "action.confirm");
+    next.confirm = readNullableLocalizedString(patch.confirm, "action.confirm");
   }
   if (Object.hasOwn(patch, "payload")) next.payload = readNullablePayload(patch.payload);
 
@@ -276,7 +280,9 @@ export async function runDownloadEffect(action: ActionEffectTarget, effect: Down
       providerPluginRoute(action.targetPluginId, normalizePluginRoute(effect.route)),
     );
     if (!response.ok) {
-      throw new Error(`Failed to download ${effect.filename ?? action.label}`);
+      throw new Error(
+        `Failed to download ${effect.filename ?? localizedString(action.label, undefined, action.id)}`,
+      );
     }
     const blobUrl = globalThis.URL.createObjectURL(await response.blob());
     try {
