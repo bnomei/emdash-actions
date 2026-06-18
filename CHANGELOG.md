@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5 - 2026-06-18
+
+- Fixed the exported plugin version metadata so EmDash reports the current package version.
+
 ## 0.2.4 - 2026-06-16
 
 - Improved the README with a shorter setup flow centered on one backend `ctx`-driven cache action.
