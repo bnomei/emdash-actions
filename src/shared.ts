@@ -3,6 +3,7 @@ export const PLUGIN_ID = "actions";
 export const PLUGIN_VERSION = "0.3.0";
 export const WIDGET_ID = "actions";
 export const DEFAULT_MANIFEST_ROUTE = ".well-known/actions";
+export const DEFAULT_ACTION_RUNNER_ROUTE = ".well-known/actions/run";
 
 const PLUGIN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const ROUTE_SEGMENT_PATTERN = /^[A-Za-z0-9._~-]+$/;

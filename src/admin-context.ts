@@ -7,7 +7,7 @@ import {
   optionalFieldString,
   readPath,
 } from "./admin-manifest";
-import type { ActionButtonContext, ActionDescriptor } from "./types";
+import type { ActionButtonContext, ActionManifestDescriptor, ActionTarget } from "./types";
 
 export type FieldContextInput = {
   id?: string;
@@ -39,7 +39,7 @@ type CurrentUserContext = {
 
 export function mergeActionContextPayload(
   payload: Record<string, unknown> | undefined,
-  options: Pick<ActionDescriptor, "contextKey" | "contextValueKey">,
+  options: Pick<ActionManifestDescriptor, "contextKey" | "contextValueKey">,
   context: ActionButtonContext | undefined,
 ) {
   const contextKey = optionalFieldString(options.contextKey);
@@ -53,7 +53,7 @@ export function mergeActionContextPayload(
 }
 
 export function readActionContextValue(
-  options: Pick<ActionDescriptor, "contextValueKey">,
+  options: Pick<ActionManifestDescriptor, "contextValueKey">,
   context: ActionButtonContext | undefined,
 ) {
   if (!context) {
@@ -71,7 +71,7 @@ export function readActionContextValue(
 }
 
 export async function contextForAction(
-  action: Pick<ActionDescriptor, "contextKey">,
+  action: Pick<ActionManifestDescriptor, "contextKey">,
   providedContext: ActionButtonContext | undefined,
   resolveContext: (signal?: AbortSignal) => Promise<ActionButtonContext>,
   signal?: AbortSignal,
@@ -118,6 +118,72 @@ export async function resolveDashboardContext(signal?: AbortSignal): Promise<Act
   return compactContext({
     surface: "dashboard",
     currentUser: currentUser ?? undefined,
+  });
+}
+
+export function dashboardActionTarget(context: ActionButtonContext | undefined): ActionTarget {
+  return actionTargetFromContext(context) ?? { type: "dashboard" };
+}
+
+export function fieldActionTarget(
+  context: ActionButtonContext | undefined,
+  input: FieldContextInput,
+): ActionTarget {
+  const contextTarget = actionTargetFromContext(context);
+  if (contextTarget?.type === "field") {
+    return compactTarget({
+      ...contextTarget,
+      value: contextTarget.value !== undefined ? contextTarget.value : input.value,
+    });
+  }
+
+  if (contextTarget?.type === "row") return contextTarget;
+
+  const route = readEntryContextRoute();
+  return compactTarget({
+    type: "field",
+    collection: context?.collection ?? route.collection,
+    entryId: context?.entryId ?? route.entryId,
+    locale: context?.entryLocale ?? route.entryLocale,
+    fieldName: context?.fieldName ?? fieldNameFromId(input.id),
+    value: context?.fieldValue !== undefined ? context.fieldValue : input.value,
+  });
+}
+
+export function actionTargetFromContext(
+  context: ActionButtonContext | undefined,
+): ActionTarget | undefined {
+  if (!context) return undefined;
+
+  if (context.surface === "dashboard") return { type: "dashboard" };
+  if (context.surface === "entry") {
+    if (!context.collection || !context.entryId) return undefined;
+    return compactTarget({
+      type: "entry",
+      collection: context.collection,
+      entryId: context.entryId,
+      locale: context.entryLocale,
+    });
+  }
+  if (context.surface === "row") {
+    return compactTarget({
+      type: "row",
+      collection: context.collection,
+      entryId: context.entryId,
+      locale: context.entryLocale,
+      fieldName: context.fieldName,
+      rowId: cleanOptionalString(context.rowId),
+      row: asRecord(context.row) ?? undefined,
+    });
+  }
+
+  return compactTarget({
+    type: "field",
+    collection: context.collection,
+    entryId: context.entryId,
+    locale: context.entryLocale,
+    fieldName: context.fieldName,
+    value: context.fieldValue,
   });
 }
 
@@ -193,4 +259,12 @@ function compactContext(context: ActionButtonContext): ActionButtonContext {
     if (value !== undefined) compacted[key] = value;
   }
   return compacted as ActionButtonContext;
+}
+
+function compactTarget<TTarget extends ActionTarget>(target: TTarget): TTarget {
+  const compacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(target)) {
+    if (value !== undefined) compacted[key] = value;
+  }
+  return compacted as TTarget;
 }

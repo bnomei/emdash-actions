@@ -3,12 +3,18 @@ import type {
   ActionButtonFieldOptions,
   ActionButtonMode,
   ActionButtonStyle,
-  ActionDescriptor,
+  ActionDescriptorMode,
   ActionFeedbackOptions,
+  ActionInputField,
+  ActionInputMetadata,
+  ActionInputType,
+  ActionManifestDescriptor,
   ActionMethod,
   ActionProviderConfig,
   ActionResultEffectPreset,
   ActionResultOpenTarget,
+  ActionTargetRequirement,
+  ActionTargetType,
   ActionsManifest,
   ActionTone,
   NormalizedActionProviderConfig,
@@ -17,6 +23,9 @@ import type { LocalizedString } from "./i18n";
 
 const ACTION_METHODS = new Set<ActionMethod>(["POST", "PUT", "PATCH", "DELETE"]);
 const ACTION_BUTTON_MODES = new Set<ActionButtonMode>(["run", "clipboard"]);
+const ACTION_DESCRIPTOR_MODES = new Set<ActionDescriptorMode>(["direct", "runner"]);
+const ACTION_TARGET_TYPES = new Set<ActionTargetType>(["dashboard", "entry", "field", "row"]);
+const ACTION_INPUT_TYPES = new Set<ActionInputType>(["string", "number", "boolean", "json"]);
 const ACTION_TONES = new Set<ActionTone>(["default", "positive", "warning", "danger", "info"]);
 const ACTION_RESULT_EFFECT_PRESETS = new Set(["clipboard", "copy", "open", "download"]);
 const ACTION_RESULT_OPEN_TARGETS = new Set<ActionResultOpenTarget>(["self", "blank"]);
@@ -52,18 +61,18 @@ function parseActionDescriptor(
   value: unknown,
   provider: NormalizedActionProviderConfig,
   index: number,
-): ActionDescriptor {
+): ActionManifestDescriptor {
   const record = asRecord(value);
   if (!record) throw new Error(`Action at index ${index} must be an object`);
 
-  const pluginId = readOptionalString(record.pluginId, "pluginId");
-  const targetPluginId = pluginId ? normalizeTargetPluginId(provider, pluginId) : undefined;
+  const mode = readActionDescriptorMode(record.mode);
   const payload = readPayload(record.payload);
+  const target = readOptionalTargetRequirement(record.target, "target");
+  const input = readOptionalInput(record.input, "input");
 
-  return {
+  const action = {
     id: readRequiredString(record.id, "id"),
     label: readRequiredLocalizedString(record.label, "label"),
-    route: normalizePluginRoute(readRequiredString(record.route, "route")),
     confirm: readOptionalLocalizedString(record.confirm, "confirm"),
     contextKey: readOptionalString(record.contextKey, "contextKey"),
     contextValueKey: readOptionalString(record.contextValueKey, "contextValueKey"),
@@ -73,15 +82,42 @@ function parseActionDescriptor(
     disabled: readOptionalBoolean(record.disabled, "disabled"),
     feedback: readOptionalFeedback(record.feedback, "feedback"),
     icon: readOptionalString(record.icon, "icon"),
-    method: readMethod(record.method),
+    input,
     payload,
     placement: readOptionalString(record.placement, "placement"),
     pollIntervalMs: readOptionalNumber(record.pollIntervalMs, "pollIntervalMs"),
     pollTimeoutMs: readOptionalNumber(record.pollTimeoutMs, "pollTimeoutMs"),
-    pluginId: targetPluginId,
     resultEffect: readOptionalResultEffect(record.resultEffect, "resultEffect"),
     resultMode: readOptionalString(record.resultMode, "resultMode"),
+    target,
     tone: readTone(record.tone),
+  };
+
+  if (mode === "runner") {
+    if (record.route !== undefined && record.route !== null) {
+      throw new Error("Runner action must not define route");
+    }
+    if (record.method !== undefined && record.method !== null) {
+      throw new Error("Runner action must not define method");
+    }
+    if (record.pluginId !== undefined && record.pluginId !== null) {
+      throw new Error("Runner action must not define pluginId");
+    }
+    return {
+      ...action,
+      mode,
+    };
+  }
+
+  const pluginId = readOptionalString(record.pluginId, "pluginId");
+  const targetPluginId = pluginId ? normalizeTargetPluginId(provider, pluginId) : undefined;
+
+  return {
+    ...action,
+    ...(mode ? { mode } : {}),
+    method: readMethod(record.method),
+    pluginId: targetPluginId,
+    route: normalizePluginRoute(readRequiredString(record.route, "route")),
   };
 }
 
@@ -112,6 +148,9 @@ export function providerFromFieldOptions(
     manifestRoute: normalizePluginRoute(
       optionalFieldString(options?.manifestRoute) ?? DEFAULT_MANIFEST_ROUTE,
     ),
+    ...(options?.runnerRoute
+      ? { runnerRoute: normalizePluginRoute(optionalFieldString(options.runnerRoute) ?? "") }
+      : {}),
     pluginId: normalizePluginId(pluginId),
   };
 }
@@ -168,6 +207,85 @@ function readMethod(value: unknown): ActionMethod | undefined {
     throw new Error(`Unsupported action method: ${value}`);
   }
   return method as ActionMethod;
+}
+
+function readActionDescriptorMode(value: unknown): ActionDescriptorMode | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new Error("Action mode must be a string");
+  const mode = value.trim();
+  if (!ACTION_DESCRIPTOR_MODES.has(mode as ActionDescriptorMode)) {
+    throw new Error(`Unsupported action mode: ${value}`);
+  }
+  return mode as ActionDescriptorMode;
+}
+
+function readTargetType(value: unknown, field: string): ActionTargetType {
+  if (typeof value !== "string") throw new Error(`Action ${field} must be a string`);
+  const targetType = value.trim();
+  if (!ACTION_TARGET_TYPES.has(targetType as ActionTargetType)) {
+    throw new Error(`Unsupported action ${field}: ${value}`);
+  }
+  return targetType as ActionTargetType;
+}
+
+function readOptionalTargetRequirement(
+  value: unknown,
+  field: string,
+): ActionTargetRequirement | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return readTargetType(value, field);
+  if (!Array.isArray(value)) throw new Error(`Action ${field} must be a string or array`);
+
+  const targetTypes = value.map((item, index) => readTargetType(item, `${field}.${index}`));
+  return [...new Set(targetTypes)];
+}
+
+function readOptionalInput(value: unknown, field: string): ActionInputMetadata | undefined {
+  if (value === undefined || value === null) return undefined;
+  const record = asRecord(value);
+  if (!record) throw new Error(`Action ${field} must be an object`);
+
+  const fields = readOptionalInputFields(record.fields, `${field}.fields`);
+  return fields ? { fields } : {};
+}
+
+function readOptionalInputFields(value: unknown, field: string): ActionInputField[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error(`Action ${field} must be an array`);
+
+  return value.map((item, index) => {
+    const record = asRecord(item);
+    if (!record) throw new Error(`Action ${field}.${index} must be an object`);
+
+    const input: ActionInputField = {
+      name: readRequiredString(record.name, `${field}.${index}.name`),
+    };
+    const label = readOptionalLocalizedString(record.label, `${field}.${index}.label`);
+    const description = readOptionalLocalizedString(
+      record.description,
+      `${field}.${index}.description`,
+    );
+    const type = readOptionalInputType(record.type, `${field}.${index}.type`);
+    const required = readOptionalBoolean(record.required, `${field}.${index}.required`);
+
+    if (label) input.label = label;
+    if (description) input.description = description;
+    if (type) input.type = type;
+    if (required !== undefined) input.required = required;
+    if (Object.hasOwn(record, "default")) input.default = record.default;
+
+    return input;
+  });
+}
+
+function readOptionalInputType(value: unknown, field: string): ActionInputType | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new Error(`Action ${field} must be a string`);
+  const inputType = value.trim();
+  if (!ACTION_INPUT_TYPES.has(inputType as ActionInputType)) {
+    throw new Error(`Unsupported action ${field}: ${value}`);
+  }
+  return inputType as ActionInputType;
 }
 
 function readTone(value: unknown): ActionTone | undefined {
@@ -434,5 +552,8 @@ export function normalizeProviderConfig(
     pluginId,
     allowedTargetPluginIds: (provider.allowedTargetPluginIds ?? []).map(normalizePluginId),
     manifestRoute: normalizePluginRoute(provider.manifestRoute?.trim() || DEFAULT_MANIFEST_ROUTE),
+    ...(provider.runnerRoute
+      ? { runnerRoute: normalizePluginRoute(provider.runnerRoute.trim()) }
+      : {}),
   };
 }

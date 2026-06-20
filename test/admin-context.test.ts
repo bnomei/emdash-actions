@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  actionTargetFromContext,
   contextForAction,
+  dashboardActionTarget,
   fieldNameFromId,
+  fieldActionTarget,
   mergeActionContextPayload,
   readActionContextValue,
   readEntryContextRoute,
@@ -74,6 +77,44 @@ describe("admin context and route helpers", () => {
       contextForAction({ contextKey: "context" }, undefined, resolveContext),
     ).resolves.toEqual({
       surface: "dashboard",
+    });
+  });
+
+  it("derives dashboard and field action targets without fetching full context", () => {
+    vi.stubGlobal("window", {
+      location: { href: "http://localhost/admin/content/posts/post-1?locale=de" },
+    });
+
+    expect(dashboardActionTarget(undefined)).toEqual({ type: "dashboard" });
+    expect(fieldActionTarget(undefined, { id: "field-title", value: "Hello" })).toEqual({
+      collection: "posts",
+      entryId: "post-1",
+      fieldName: "title",
+      locale: "de",
+      type: "field",
+      value: "Hello",
+    });
+  });
+
+  it("derives targets from compatibility context when provided", () => {
+    expect(
+      actionTargetFromContext({
+        collection: "posts",
+        entryId: "post-1",
+        entryLocale: "en",
+        fieldName: "blocks",
+        row: { id: "row-1", text: "Hello" },
+        rowId: "row-1",
+        surface: "row",
+      }),
+    ).toEqual({
+      collection: "posts",
+      entryId: "post-1",
+      fieldName: "blocks",
+      locale: "en",
+      row: { id: "row-1", text: "Hello" },
+      rowId: "row-1",
+      type: "row",
     });
   });
 });

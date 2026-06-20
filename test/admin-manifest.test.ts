@@ -117,6 +117,92 @@ describe("admin manifest parsing", () => {
     });
   });
 
+  it("normalizes runner actions without requiring business routes", () => {
+    const manifest = parseActionsManifest(
+      {
+        actions: [
+          {
+            id: "field.summarize",
+            label: "Summarize",
+            mode: "runner",
+            placement: "field",
+            payload: { model: "small" },
+            target: ["field", "entry"],
+            input: {
+              fields: [
+                {
+                  name: "instructions",
+                  label: "Instructions",
+                  type: "string",
+                  required: false,
+                  default: "Keep it short",
+                },
+              ],
+            },
+          },
+        ],
+      },
+      provider,
+    );
+
+    expect(manifest.actions[0]).toEqual(
+      expect.objectContaining({
+        id: "field.summarize",
+        input: {
+          fields: [
+            {
+              default: "Keep it short",
+              label: "Instructions",
+              name: "instructions",
+              required: false,
+              type: "string",
+            },
+          ],
+        },
+        label: "Summarize",
+        mode: "runner",
+        payload: { model: "small" },
+        placement: "field",
+        target: ["field", "entry"],
+      }),
+    );
+    expect("route" in manifest.actions[0]!).toBe(false);
+  });
+
+  it("rejects runner actions with client-selected routes or targets", () => {
+    expect(() =>
+      parseActionsManifest(
+        {
+          actions: [
+            {
+              id: "unsafe",
+              label: "Unsafe",
+              mode: "runner",
+              route: "business/delete",
+            },
+          ],
+        },
+        provider,
+      ),
+    ).toThrow(/must not define route/);
+
+    expect(() =>
+      parseActionsManifest(
+        {
+          actions: [
+            {
+              id: "unsafe",
+              label: "Unsafe",
+              mode: "runner",
+              pluginId: "target",
+            },
+          ],
+        },
+        provider,
+      ),
+    ).toThrow(/must not define pluginId/);
+  });
+
   it("rejects duplicate action ids and disallowed target plugin ids", () => {
     expect(() =>
       parseActionsManifest(
@@ -162,11 +248,13 @@ describe("admin manifest parsing", () => {
         allowedTargetPluginIds: ["target"],
         manifestRoute: " /manifest ",
         pluginId: " source ",
+        runnerRoute: " /.well-known/actions/run ",
       }),
     ).toEqual({
       allowedTargetPluginIds: ["target"],
       manifestRoute: "manifest",
       pluginId: "source",
+      runnerRoute: ".well-known/actions/run",
     });
 
     expect(
@@ -175,12 +263,14 @@ describe("admin manifest parsing", () => {
         manifestRoute: "/field-actions",
         pluginId: " source ",
         providerLabel: "Source",
+        runnerRoute: " /actions/run ",
       }),
     ).toEqual({
       allowedTargetPluginIds: ["target"],
       label: "Source",
       manifestRoute: "field-actions",
       pluginId: "source",
+      runnerRoute: "actions/run",
     });
   });
 

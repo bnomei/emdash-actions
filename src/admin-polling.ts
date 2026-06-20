@@ -1,7 +1,7 @@
 import { normalizePluginRoute } from "./shared";
 import { sleep as defaultSleep, throwIfAborted } from "./admin-cancellation";
 import { numberOrNull } from "./admin-manifest";
-import type { ActionDescriptor, ActionRunResult } from "./types";
+import type { ActionManifestDescriptor, ActionRunResult } from "./types";
 import { localizedString } from "./i18n";
 
 const PENDING_JOB_STATUSES = new Set<string>(["accepted", "queued", "running"]);
@@ -12,7 +12,7 @@ const MAX_POLL_INTERVAL_MS = 30000;
 const DEFAULT_POLL_TIMEOUT_MS = 120000;
 const MAX_POLL_TIMEOUT_MS = 900000;
 
-type PollStatus<TAction extends ActionDescriptor> = (
+type PollStatus<TAction extends ActionManifestDescriptor> = (
   action: TAction,
   statusRoute: string,
   signal?: AbortSignal,
@@ -23,7 +23,7 @@ type WaitForActionResultOptions = {
   now?: () => number;
 };
 
-export async function waitForActionResult<TAction extends ActionDescriptor>(
+export async function waitForActionResult<TAction extends ActionManifestDescriptor>(
   action: TAction,
   initialResult: ActionRunResult,
   onProgress: (result: ActionRunResult) => void,
@@ -61,7 +61,7 @@ export async function waitForActionResult<TAction extends ActionDescriptor>(
 }
 
 export function shouldStartPolling(
-  action: ActionDescriptor,
+  action: ActionManifestDescriptor,
   result: ActionRunResult,
   statusRoute: string | null,
 ) {
@@ -94,7 +94,7 @@ export function readJobStatus(result: ActionRunResult) {
   return typeof result.jobStatus === "string" ? result.jobStatus.trim().toLowerCase() : null;
 }
 
-export function pollDelayMs(action: ActionDescriptor, result: ActionRunResult) {
+export function pollDelayMs(action: ActionManifestDescriptor, result: ActionRunResult) {
   return clampPollMs(
     numberOrNull(result.pollAfterMs) ??
       numberOrNull(action.pollIntervalMs) ??
@@ -102,7 +102,7 @@ export function pollDelayMs(action: ActionDescriptor, result: ActionRunResult) {
   );
 }
 
-export function pollTimeoutMs(action: ActionDescriptor) {
+export function pollTimeoutMs(action: ActionManifestDescriptor) {
   return Math.min(
     MAX_POLL_TIMEOUT_MS,
     Math.max(MIN_POLL_INTERVAL_MS, numberOrNull(action.pollTimeoutMs) ?? DEFAULT_POLL_TIMEOUT_MS),

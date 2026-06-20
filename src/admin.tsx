@@ -22,12 +22,18 @@ import { apiFetch, parseApiResponse } from "emdash/plugin-utils";
 import { useEffect, useRef, useState } from "react";
 import { useAdminLocale } from "./admin-locale";
 import {
+  dashboardActionTarget,
+  fieldActionTarget,
   contextForAction,
-  mergeActionContextPayload,
   readActionContextValue,
   resolveDashboardContext,
   resolveFieldContext,
 } from "./admin-context";
+import {
+  actionMatchesTargetRequirement,
+  actionRequestInit,
+  actionRequestRoute,
+} from "./admin-invocation";
 import {
   actionPatchChangesLabel,
   actionPatchFromResult,
@@ -42,7 +48,6 @@ import {
   asRecord,
   cleanOptionalString,
   errorMessage,
-  hasJsonBody,
   numberOrNull,
   optionalFieldLocalizedString,
   optionalFieldString,
@@ -87,10 +92,11 @@ import type {
   ActionButtonStyle,
   ActionButtonContext,
   ActionButtonFieldOptions,
-  ActionDescriptor,
   ActionJobStatus,
+  ActionManifestDescriptor,
   ActionProviderConfig,
   ActionRunResult,
+  ActionTarget,
   ActionToast,
   ActionsManifest,
   ActionsProvidersResponse,
@@ -108,7 +114,7 @@ type LoadState =
       i18n?: ActionsI18nConfig;
     };
 
-type UiAction = ActionDescriptor & {
+type UiAction = ActionManifestDescriptor & {
   key: string;
   provider: NormalizedActionProviderConfig;
   targetPluginId: string;
@@ -250,11 +256,17 @@ function useActionI18n(i18n: ActionsI18nConfig | undefined): ActionsI18nConfig {
   return { ...i18n, locale };
 }
 
-function actionLabel(action: Pick<ActionDescriptor, "id" | "label">, i18n: ActionsI18nConfig) {
+function actionLabel(
+  action: Pick<ActionManifestDescriptor, "id" | "label">,
+  i18n: ActionsI18nConfig,
+) {
   return localizedString(action.label, i18n, action.id);
 }
 
-function actionDescription(action: Pick<ActionDescriptor, "description">, i18n: ActionsI18nConfig) {
+function actionDescription(
+  action: Pick<ActionManifestDescriptor, "description">,
+  i18n: ActionsI18nConfig,
+) {
   return localizedString(action.description, i18n);
 }
 
@@ -279,6 +291,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   const runAbortControllers = useRef<Record<string, AbortController>>({});
   const responseI18n = state.status === "ready" ? state.i18n : undefined;
   const i18n = useActionI18n(mergeI18n(contextI18n(context), responseI18n));
+  const targetType = dashboardActionTarget(context).type;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -287,7 +300,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
     async function load() {
       try {
         const providers = await apiGet<ActionsProvidersResponse>("providers", controller.signal);
-        const result = await loadProviderActions(providers, controller.signal);
+        const result = await loadProviderActions(providers, controller.signal, targetType);
         if (!active) return;
         setState({ status: "ready", ...result, i18n: providers.i18n });
       } catch (error) {
@@ -301,7 +314,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
       active = false;
       controller.abort();
     };
-  }, []);
+  }, [targetType]);
 
   useEffect(() => {
     return () => {
@@ -383,7 +396,13 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
       throwIfAborted(controller.signal);
       const result = normalizeActionRunResult(
         action,
-        await callAction(action, actionContext, controller.signal, i18n),
+        await callAction(
+          action,
+          actionContext,
+          dashboardActionTarget(actionContext),
+          controller.signal,
+          i18n,
+        ),
       );
       const finalResult = await waitForActionResult(
         action,
@@ -562,6 +581,7 @@ function ActionButtonFieldContent({
   const feedbackTimer = useRef<FeedbackTimer | null>(null);
   const runAbortController = useRef<AbortController | null>(null);
   const i18n = useActionI18n(mergeI18n(contextI18n(context), options?.i18n));
+  const targetType = fieldActionTarget(context, { id, label, required, value }).type;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -579,7 +599,14 @@ function ActionButtonFieldContent({
           return;
         }
 
-        const resolved = await resolveFieldAction(options, value, label, controller.signal, i18n);
+        const resolved = await resolveFieldAction(
+          options,
+          value,
+          label,
+          targetType,
+          controller.signal,
+          i18n,
+        );
         if (!active) return;
         setAction(resolved);
         setError(null);
@@ -596,7 +623,7 @@ function ActionButtonFieldContent({
       active = false;
       controller.abort();
     };
-  }, [label, options, value]);
+  }, [label, options, targetType, value]);
 
   useEffect(() => {
     return () => {
@@ -621,7 +648,7 @@ function ActionButtonFieldContent({
     nextFeedback: ButtonFeedback,
     reset = false,
     cooldownSource:
-      | Pick<ActionDescriptor, "cooldownMs">
+      | Pick<ActionManifestDescriptor, "cooldownMs">
       | Pick<ActionButtonFieldOptions, "cooldownMs">
       | null = action,
   ) {
@@ -668,7 +695,13 @@ function ActionButtonFieldContent({
       throwIfAborted(controller.signal);
       const result = normalizeActionRunResult(
         action,
-        await callAction(action, actionContext, controller.signal, i18n),
+        await callAction(
+          action,
+          actionContext,
+          fieldActionTarget(actionContext, { id, label, required, value }),
+          controller.signal,
+          i18n,
+        ),
       );
       const finalResult = await waitForActionResult(
         action,
@@ -809,7 +842,11 @@ function ActionButtonFieldContent({
   );
 }
 
-async function loadProviderActions(response: ActionsProvidersResponse, signal?: AbortSignal) {
+async function loadProviderActions(
+  response: ActionsProvidersResponse,
+  signal?: AbortSignal,
+  targetType: ActionTarget["type"] = "dashboard",
+) {
   const results = await Promise.all(
     response.providers.map(async (provider) => {
       try {
@@ -835,11 +872,12 @@ async function loadProviderActions(response: ActionsProvidersResponse, signal?: 
 
     for (const action of result.manifest.actions) {
       if (!matchesPlacement(action, response.placement)) continue;
+      if (!actionMatchesTargetRequirement(action, targetType)) continue;
       actions.push({
         ...action,
         key: actionBusyKey(result.provider.pluginId, action.id),
         provider: result.provider,
-        targetPluginId: action.pluginId ?? result.provider.pluginId,
+        targetPluginId: targetPluginIdForAction(action, result.provider),
       });
     }
   }
@@ -866,6 +904,7 @@ async function resolveFieldAction(
   options: ActionButtonFieldOptions | undefined,
   value: unknown,
   label: string | undefined,
+  targetType: ActionTarget["type"],
   signal?: AbortSignal,
   i18n?: ActionsI18nConfig,
 ): Promise<UiAction> {
@@ -908,7 +947,10 @@ async function resolveFieldAction(
   const manifest = await fetchManifest(provider, signal, i18n);
   const placement = optionalFieldString(options?.placement) ?? "field";
   const action = manifest.actions.find(
-    (candidate) => candidate.id === actionId && matchesPlacement(candidate, placement),
+    (candidate) =>
+      candidate.id === actionId &&
+      matchesPlacement(candidate, placement) &&
+      actionMatchesTargetRequirement(candidate, targetType),
   );
 
   if (!action) {
@@ -945,15 +987,22 @@ function fieldProvider(
 }
 
 function fieldActionFromDescriptor(
-  action: ActionDescriptor,
+  action: ActionManifestDescriptor,
   provider: NormalizedActionProviderConfig,
 ): UiAction {
   return {
     ...action,
     key: `field:${provider.pluginId}:${action.id}`,
     provider,
-    targetPluginId: action.pluginId ?? provider.pluginId,
+    targetPluginId: targetPluginIdForAction(action, provider),
   };
+}
+
+function targetPluginIdForAction(
+  action: ActionManifestDescriptor,
+  provider: NormalizedActionProviderConfig,
+) {
+  return "pluginId" in action && action.pluginId ? action.pluginId : provider.pluginId;
 }
 
 function mergeFieldPayload(
@@ -1025,21 +1074,15 @@ async function apiGet<T>(route: string, signal?: AbortSignal): Promise<T> {
 async function callAction(
   action: UiAction,
   context: ActionButtonContext | undefined,
+  target: ActionTarget | undefined,
   signal?: AbortSignal,
   i18n?: ActionsI18nConfig,
 ) {
   const label = actionLabel(action, i18n ?? {});
-  const method = action.method ?? "POST";
-  const headers = new Headers();
-  const init: RequestInit = { headers, method, signal };
-
-  if (hasJsonBody(method)) {
-    const payload = mergeActionContextPayload(action.payload, action, context);
-    headers.set("Content-Type", "application/json");
-    init.body = JSON.stringify(payload ?? {});
-  }
-
-  const response = await apiFetch(providerPluginRoute(action.targetPluginId, action.route), init);
+  const response = await apiFetch(
+    actionRequestRoute(action),
+    actionRequestInit(action, context, target, signal),
+  );
   return parseApiResponse<unknown>(
     response,
     formatActionMessage("failedToRunAction", i18n, { action: label }),
@@ -1105,7 +1148,7 @@ function toastVariant(type: ActionToast["type"]) {
   return "default";
 }
 
-function matchesPlacement(action: ActionDescriptor, placement: string | null) {
+function matchesPlacement(action: ActionManifestDescriptor, placement: string | null) {
   return (
     !placement ||
     !action.placement ||
@@ -1124,7 +1167,7 @@ function buttonVariant(tone: NoticeTone | undefined, feedback?: ButtonFeedback) 
 }
 
 function buttonStyle(
-  action: Pick<ActionDescriptor, "buttonStyle"> | null,
+  action: Pick<ActionManifestDescriptor, "buttonStyle"> | null,
   feedback: ButtonFeedback,
   options?: Pick<ActionButtonFieldOptions, "buttonStyle">,
 ) {
@@ -1204,17 +1247,17 @@ function feedbackToneToken(tone: NoticeTone | undefined) {
   return null;
 }
 
-function actionIcon(action: ActionDescriptor) {
+function actionIcon(action: ActionManifestDescriptor) {
   return fieldIcon(action.icon);
 }
 
-function buttonFeedbackIcon(action: ActionDescriptor, feedback: ButtonFeedback) {
+function buttonFeedbackIcon(action: ActionManifestDescriptor, feedback: ButtonFeedback) {
   return feedback ? feedbackIcon(feedback.tone) : actionIcon(action);
 }
 
 function fieldButtonFeedbackIcon(
   mode: ActionButtonMode,
-  action: ActionDescriptor | null,
+  action: ActionManifestDescriptor | null,
   options: ActionButtonFieldOptions | undefined,
   feedback: ButtonFeedback,
 ) {
@@ -1223,7 +1266,7 @@ function fieldButtonFeedbackIcon(
 
 function fieldButtonIcon(
   mode: ActionButtonMode,
-  action: ActionDescriptor | null,
+  action: ActionManifestDescriptor | null,
   options: ActionButtonFieldOptions | undefined,
 ) {
   const icon = optionalFieldString(options?.icon);
@@ -1255,7 +1298,7 @@ function feedbackIcon(tone: NoticeTone) {
 }
 
 function feedbackFromResult(
-  action: ActionDescriptor,
+  action: ActionManifestDescriptor,
   result: ActionRunResult,
   i18n: ActionsI18nConfig,
   fallbackMessage = formatActionMessage("actionRunning", i18n, {
@@ -1272,7 +1315,7 @@ function feedbackFromResult(
 }
 
 function progressFeedbackForAction(
-  action: ActionDescriptor,
+  action: ActionManifestDescriptor,
   i18n: ActionsI18nConfig,
 ): ButtonFeedback {
   return {
@@ -1292,7 +1335,7 @@ function resultTone(result: ActionRunResult): NoticeTone {
 }
 
 function resultMessage(
-  action: ActionDescriptor,
+  action: ActionManifestDescriptor,
   result: ActionRunResult,
   phase: "progress" | "success" | "error",
   fallbackMessage: string,
@@ -1324,7 +1367,7 @@ function inlineNotification(result: ActionRunResult) {
 }
 
 function resultFeedbackStyle(
-  action: ActionDescriptor,
+  action: ActionManifestDescriptor,
   result: ActionRunResult,
   phase: "progress" | "success" | "error",
 ) {

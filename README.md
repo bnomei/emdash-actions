@@ -165,6 +165,7 @@ button feedback plus toast.
 | Copy a value without backend code                    | [Clipboard Field Button](./examples/clipboard-field-button.md)       |
 | Call one backend route from a field                  | [Direct Route Field Action](./examples/direct-route-field-action.md) |
 | Let a provider own labels, icon, route, and feedback | [Manifest Field Action](./examples/manifest-field-action.md)         |
+| Use one safe provider-owned runner route             | [Runner Field Action](./examples/runner-field-action.md)             |
 | Add a dashboard action                               | [Dashboard Action](./examples/dashboard-action.md)                   |
 | Return clipboard, open, download, or reload effects  | [Response effect examples](./examples/README.md)                     |
 | Show a Kumo toast                                    | [Toast Notification](./examples/toast-notification.md)               |
@@ -215,6 +216,54 @@ POST /_emdash/api/plugins/cache-actions/cache/clear
 
 Field buttons can also skip the manifest and call a direct route from field
 options. Dashboard discovery uses `actionsPlugin({ providers })`.
+
+Manifest actions can also use runner mode:
+
+```ts
+{
+  actions: [
+    {
+      id: "field.summarize",
+      mode: "runner",
+      label: "Summarize",
+      placement: "field",
+      target: "field",
+      payload: { format: "short" },
+    },
+  ],
+}
+```
+
+Runner actions always call the provider-owned runner route, defaulting to:
+
+```txt
+POST /_emdash/api/plugins/<provider>/.well-known/actions/run
+```
+
+with a normalized invocation:
+
+```json
+{
+  "actionId": "field.summarize",
+  "payload": {
+    "format": "short"
+  },
+  "target": {
+    "type": "field",
+    "collection": "posts",
+    "entryId": "post-1",
+    "fieldName": "summary",
+    "value": "Current field value"
+  }
+}
+```
+
+Use direct route mode when the browser should call one explicit provider route
+such as `field/slugify`. Use runner mode when the provider should keep a fixed
+server-side action registry and avoid exposing one callable route per button.
+Runner providers must treat `actionId` as an identifier only, look it up in that
+registry, authorize it server-side, and re-read target documents before mutating
+content or protected state.
 
 > [!IMPORTANT]
 > Field JSON belongs in the target collection schema's `fields` array. It does
@@ -294,6 +343,8 @@ shape and caveats.
 - `label`: human-readable provider label.
 - `manifestRoute`: provider route that returns the manifest. Defaults to
   `.well-known/actions`.
+- `runnerRoute`: provider route for `mode: "runner"` actions. Defaults to
+  `.well-known/actions/run`.
 - `allowedTargetPluginIds`: cross-plugin route targets this provider may call.
 
 ### Field Button Options

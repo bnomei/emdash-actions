@@ -4,10 +4,51 @@ export type ActionMethod = "POST" | "PUT" | "PATCH" | "DELETE";
 export type ActionTone = "default" | "positive" | "warning" | "danger" | "info";
 export type ActionWidgetSize = "full" | "half" | "third";
 export type ActionButtonMode = "run" | "clipboard";
-export type ActionSurface = "field" | "dashboard";
+export type ActionSurface = "field" | "dashboard" | "entry" | "row";
+export type ActionDescriptorMode = "direct" | "runner";
 export type ActionResultMode = "emdash-action-result-v1" | "emdash-action-accepted-v1";
 export type ActionToastType = ActionTone | "success" | "error";
 export type ActionResultOpenTarget = "self" | "blank";
+export type ActionTarget =
+  | { type: "dashboard" }
+  | { type: "entry"; collection: string; entryId: string; locale?: string | null }
+  | {
+      type: "field";
+      collection?: string;
+      entryId?: string;
+      locale?: string | null;
+      fieldName?: string;
+      value?: unknown;
+    }
+  | {
+      type: "row";
+      collection?: string;
+      entryId?: string;
+      locale?: string | null;
+      fieldName?: string;
+      rowId?: string;
+      row?: Record<string, unknown>;
+    };
+export type ActionTargetType = ActionTarget["type"];
+export type ActionTargetRequirement = ActionTargetType | ActionTargetType[];
+export type ActionInputType = "string" | "number" | "boolean" | "json";
+export interface ActionInputField {
+  name: string;
+  label?: LocalizedString;
+  description?: LocalizedString;
+  type?: ActionInputType;
+  required?: boolean;
+  default?: unknown;
+}
+export interface ActionInputMetadata {
+  fields?: ActionInputField[];
+}
+export interface ActionInvocation {
+  actionId: string;
+  payload?: Record<string, unknown>;
+  context?: ActionButtonContext;
+  target?: ActionTarget;
+}
 export type ActionResultEffectPreset =
   | "clipboard"
   | "copy"
@@ -104,6 +145,7 @@ export interface ActionProviderConfig {
   pluginId: string;
   label?: LocalizedString;
   manifestRoute?: string;
+  runnerRoute?: string;
   allowedTargetPluginIds?: string[];
 }
 
@@ -112,12 +154,9 @@ export interface NormalizedActionProviderConfig extends ActionProviderConfig {
   allowedTargetPluginIds: string[];
 }
 
-export interface ActionDescriptor {
+export interface ActionDescriptorBase {
   id: string;
   label: LocalizedString;
-  route: string;
-  method?: ActionMethod;
-  pluginId?: string;
   description?: LocalizedString;
   icon?: string;
   tone?: ActionTone;
@@ -134,7 +173,27 @@ export interface ActionDescriptor {
   resultEffect?: ActionResultEffectPreset;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
+  target?: ActionTargetRequirement;
+  input?: ActionInputMetadata;
 }
+
+export interface ActionDescriptor extends ActionDescriptorBase {
+  mode?: "direct";
+  route: string;
+  method?: ActionMethod;
+  pluginId?: string;
+}
+
+export type DirectActionDescriptor = ActionDescriptor;
+
+export interface RunnerActionDescriptor extends ActionDescriptorBase {
+  mode: "runner";
+  method?: never;
+  pluginId?: never;
+  route?: never;
+}
+
+export type ActionManifestDescriptor = ActionDescriptor | RunnerActionDescriptor;
 
 export interface ActionButtonFieldOptions {
   mode?: ActionButtonMode;
@@ -151,6 +210,7 @@ export interface ActionButtonFieldOptions {
   confirm?: LocalizedString;
   placement?: string;
   manifestRoute?: string;
+  runnerRoute?: string;
   allowedTargetPluginIds?: string[];
   payload?: Record<string, unknown>;
   valueKey?: string;
@@ -172,7 +232,7 @@ export interface ActionButtonFieldOptions {
 }
 
 export interface ActionsManifest {
-  actions: ActionDescriptor[];
+  actions: ActionManifestDescriptor[];
 }
 
 export interface ActionsProvidersResponse {

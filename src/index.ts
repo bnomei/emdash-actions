@@ -1,5 +1,6 @@
 import { definePlugin, type PluginDescriptor } from "emdash";
 import {
+  DEFAULT_ACTION_RUNNER_ROUTE,
   DEFAULT_MANIFEST_ROUTE,
   PACKAGE_NAME,
   PLUGIN_ID,
@@ -12,7 +13,7 @@ import {
 } from "./shared";
 import { actionMessage, type ActionsI18nConfig } from "./i18n";
 import type {
-  ActionDescriptor,
+  ActionManifestDescriptor,
   ActionProviderConfig,
   ActionsCreatePluginOptions,
   ActionsDescriptorOptions,
@@ -42,8 +43,15 @@ export type {
   ActionButtonContext,
   ActionButtonFieldOptions,
   ActionDescriptor,
+  DirectActionDescriptor,
+  ActionDescriptorMode,
   ActionFeedbackOptions,
+  ActionInputField,
+  ActionInputMetadata,
+  ActionInputType,
+  ActionInvocation,
   ActionJobStatus,
+  ActionManifestDescriptor,
   ActionMethod,
   ActionProviderConfig,
   ActionResultActionPatch,
@@ -53,6 +61,9 @@ export type {
   ActionResultMode,
   ActionRunResult,
   ActionSurface,
+  ActionTarget,
+  ActionTargetRequirement,
+  ActionTargetType,
   ActionToast,
   ActionToastType,
   ActionTone,
@@ -62,8 +73,10 @@ export type {
   ActionsProvidersResponse,
   ActionWidgetSize,
   NormalizedActionProviderConfig,
+  RunnerActionDescriptor,
 } from "./types";
 export {
+  DEFAULT_ACTION_RUNNER_ROUTE,
   DEFAULT_MANIFEST_ROUTE,
   PACKAGE_NAME,
   PLUGIN_ID,
@@ -148,12 +161,15 @@ export function normalizeProviders(
         manifestRoute: normalizePluginRoute(
           provider.manifestRoute?.trim() || DEFAULT_MANIFEST_ROUTE,
         ),
+        ...(provider.runnerRoute
+          ? { runnerRoute: normalizePluginRoute(provider.runnerRoute.trim()) }
+          : {}),
       },
     ];
   });
 }
 
-export function defineAction(action: ActionDescriptor): ActionDescriptor {
+export function defineAction<TAction extends ActionManifestDescriptor>(action: TAction): TAction {
   return action;
 }
 

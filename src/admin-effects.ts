@@ -15,7 +15,7 @@ import {
   readRequiredLocalizedString,
 } from "./admin-manifest";
 import type {
-  ActionDescriptor,
+  ActionManifestDescriptor,
   ActionResultActionPatch,
   ActionResultEffectPreset,
   ActionResultEffects,
@@ -23,7 +23,7 @@ import type {
   ActionRunResult,
 } from "./types";
 
-export type ActionEffectTarget = ActionDescriptor & {
+export type ActionEffectTarget = ActionManifestDescriptor & {
   targetPluginId: string;
 };
 
@@ -37,11 +37,11 @@ type ActionEffectDependencies = {
   writeClipboardText?: (text: string) => Promise<void>;
   runDownloadEffect?: (action: ActionEffectTarget, effect: DownloadEffect) => Promise<void>;
   runOpenEffect?: (effect: { url: string; target: ActionResultOpenTarget }) => void;
-  scheduleReload?: (action: ActionDescriptor, delayMs: number | undefined) => void;
+  scheduleReload?: (action: ActionManifestDescriptor, delayMs: number | undefined) => void;
 };
 
 export function normalizeActionRunResult(
-  action: Pick<ActionDescriptor, "resultEffect">,
+  action: Pick<ActionManifestDescriptor, "resultEffect">,
   value: unknown,
 ): ActionRunResult {
   const record = asRecord(value);
@@ -130,7 +130,7 @@ export function actionPatchFromResult(result: ActionRunResult): ActionResultActi
   return Object.keys(next).length > 0 ? next : null;
 }
 
-export function mergeActionResultPatch<TAction extends ActionDescriptor>(
+export function mergeActionResultPatch<TAction extends ActionManifestDescriptor>(
   action: TAction,
   result: ActionRunResult,
 ): TAction | null {
@@ -138,7 +138,7 @@ export function mergeActionResultPatch<TAction extends ActionDescriptor>(
   return patch ? mergeActionPatch(action, patch) : null;
 }
 
-export function mergeActionPatch<TAction extends ActionDescriptor>(
+export function mergeActionPatch<TAction extends ActionManifestDescriptor>(
   action: TAction,
   patch: ActionResultActionPatch,
 ): TAction {
@@ -309,7 +309,7 @@ export function triggerDownload(url: string, filename: string | undefined) {
 }
 
 export function scheduleReload(
-  action: Pick<ActionDescriptor, "cooldownMs">,
+  action: Pick<ActionManifestDescriptor, "cooldownMs">,
   delayMs: number | undefined,
 ) {
   const delay = clampFeedbackMs(delayMs ?? feedbackCooldownMs(action));
@@ -334,7 +334,9 @@ export async function writeClipboardText(text: string) {
   await globalThis.navigator.clipboard.writeText(text);
 }
 
-export function feedbackCooldownMs(source: Pick<ActionDescriptor, "cooldownMs"> | undefined) {
+export function feedbackCooldownMs(
+  source: Pick<ActionManifestDescriptor, "cooldownMs"> | undefined,
+) {
   return clampFeedbackMs(numberOrNull(source?.cooldownMs) ?? 2000);
 }
 

@@ -20,6 +20,8 @@ code. Clipboard-only field buttons do not need a provider route.
   field.
 - [Manifest Field Action](./manifest-field-action.md): a field button resolves
   an action from a provider manifest before calling the route.
+- [Runner Field Action](./runner-field-action.md): a field button resolves a
+  manifest action and posts it to one fixed provider-owned runner route.
 - [Dashboard Action](./dashboard-action.md): the dashboard widget renders a
   global action from a provider manifest.
 - [Clipboard Effect](./clipboard-effect.md): backend route returns text that the
@@ -61,6 +63,12 @@ POST /_emdash/api/plugins/slug-actions/field/slugify
 
 Routes must stay relative. Do not use absolute URLs, query strings, hashes,
 encoded paths, traversal segments, or backslashes.
+
+Runner mode is different: a manifest action with `mode: "runner"` does not
+declare a business route. The browser posts `{ actionId, payload, context,
+target }` to the provider runner route, which defaults to
+`.well-known/actions/run`. The provider must resolve `actionId` from a fixed
+server-side registry and re-read any target document before mutating it.
 
 ## Field JSON Location
 
