@@ -265,12 +265,14 @@ const inlineCheckboxStyle = {
 const buttonContentStyle = {
   alignItems: "center",
   display: "inline-flex",
+  flexWrap: "wrap",
   gap: "0.45rem",
   minWidth: 0,
 } satisfies CSSProperties;
 
 const buttonLabelStyle = {
-  whiteSpace: "nowrap",
+  overflowWrap: "anywhere",
+  whiteSpace: "normal",
 } satisfies CSSProperties;
 
 function contextI18n(context: ActionButtonContext | undefined): ActionsI18nConfig | undefined {
@@ -1089,7 +1091,7 @@ function ActionButtonFieldContent({
   );
 }
 
-function ActionButtonContent({ icon, label }: { icon: ReactNode; label: string }) {
+export function ActionButtonContent({ icon, label }: { icon: ReactNode; label: string }) {
   return (
     <span style={buttonContentStyle}>
       {icon}
