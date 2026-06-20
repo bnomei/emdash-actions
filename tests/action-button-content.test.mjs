@@ -2,17 +2,27 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ActionButtonContent } from "../dist/admin.mjs";
+import { fields } from "../dist/admin.mjs";
 
-test("action button content renders visible labels next to icons", () => {
+test("field action button renders visible long labels next to icons", () => {
+  const label = "Replay webhook with a deliberately long label";
   const markup = renderToStaticMarkup(
-    React.createElement(ActionButtonContent, {
-      icon: React.createElement("span", { "aria-hidden": "true" }, "i"),
-      label: "Replay webhook with a deliberately long label",
+    React.createElement(fields.button, {
+      minimal: true,
+      onChange() {},
+      options: {
+        icon: "replay",
+        label,
+      },
+      value: "",
     }),
   );
 
-  assert.match(markup, /Replay webhook with a deliberately long label/);
+  assert.match(markup, new RegExp(label));
+  assert.match(markup, new RegExp(`aria-label="${label}"`));
+  assert.match(markup, /<svg[\s>]/);
+  assert.match(markup, /max-width:100%/);
+  assert.match(markup, /min-width:0/);
   assert.match(markup, /overflow-wrap:anywhere/);
   assert.doesNotMatch(markup, /white-space:nowrap/);
 });

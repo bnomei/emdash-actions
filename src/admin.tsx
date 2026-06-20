@@ -275,6 +275,15 @@ const buttonLabelStyle = {
   whiteSpace: "normal",
 } satisfies CSSProperties;
 
+const buttonLayoutStyle = {
+  flexShrink: 1,
+  height: "auto",
+  maxWidth: "100%",
+  minHeight: "2.25rem",
+  minWidth: 0,
+  whiteSpace: "normal",
+} satisfies CSSProperties;
+
 function contextI18n(context: ActionButtonContext | undefined): ActionsI18nConfig | undefined {
   const config = context?.i18n;
   if (!config) return undefined;
@@ -573,8 +582,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
             const actionDisplayLabel = actionLabel(action, i18n);
             const buttonLabel =
               feedback?.message ??
-              localizedString(action.form?.submitLabel, i18n) ??
-              actionDisplayLabel;
+              (localizedString(action.form?.submitLabel, i18n) || actionDisplayLabel);
 
             return (
               <LayerCard key={action.key}>
@@ -607,7 +615,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
                       disabled={isActionDisabled(busyKeys, action.key, action.disabled === true)}
                       loading={isBusy}
                       onClick={() => void runAction(action)}
-                      style={buttonStyle(action, feedback)}
+                      style={buttonInlineStyle(buttonStyle(action, feedback))}
                       aria-label={buttonLabel}
                       title={buttonLabel}
                       type="button"
@@ -1038,7 +1046,7 @@ function ActionButtonFieldContent({
     label ||
     fieldDefaultButtonLabel(mode, i18n);
   const buttonText =
-    feedback?.message ?? localizedString(action?.form?.submitLabel, i18n) ?? buttonLabel;
+    feedback?.message ?? (localizedString(action?.form?.submitLabel, i18n) || buttonLabel);
   const description =
     localizedString(options?.description, i18n) || (action ? actionDescription(action, i18n) : "");
   const disabled = busy || options?.disabled === true || (mode === "run" && !action);
@@ -1073,7 +1081,7 @@ function ActionButtonFieldContent({
         disabled={disabled || action?.disabled === true}
         loading={busy}
         onClick={() => void runFieldAction()}
-        style={buttonStyle(action, feedback, options)}
+        style={buttonInlineStyle(buttonStyle(action, feedback, options))}
         aria-label={buttonText}
         title={buttonText}
         type="button"
@@ -1091,7 +1099,7 @@ function ActionButtonFieldContent({
   );
 }
 
-export function ActionButtonContent({ icon, label }: { icon: ReactNode; label: string }) {
+function ActionButtonContent({ icon, label }: { icon: ReactNode; label: string }) {
   return (
     <span style={buttonContentStyle}>
       {icon}
@@ -1434,6 +1442,10 @@ function buttonStyle(
     feedback?.phase === "progress" ? undefined : (options?.buttonStyle ?? action?.buttonStyle);
   const style = mergeButtonStyle(base, feedback?.style ?? defaultButtonFeedbackStyle(feedback));
   return style && Object.keys(style).length > 0 ? style : undefined;
+}
+
+function buttonInlineStyle(style: CSSProperties | undefined): CSSProperties {
+  return style ? { ...buttonLayoutStyle, ...style } : buttonLayoutStyle;
 }
 
 function mergeButtonStyle(
