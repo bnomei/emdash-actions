@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 - 2026-06-20
+
+- Added provider-owned runner actions with `runner: true`, provider
+  `runnerRoute`, default `.well-known/actions/run`, and canonical
+  `ActionInvocation` requests containing `invocationId`, `actionId`, `payload`,
+  `context`, and `target`.
+- Added canonical dashboard, entry, field, and row targets plus small target
+  metadata for client-side missing-target warnings.
+- Added compact inline form metadata and rendering for scalar action inputs,
+  with required-field validation and form values merged into action payloads.
+- Added scoped reload effects and stale-target conflict semantics for action
+  result bodies using `status: 409`, warning severity, and reload effects.
+- Preserved direct-route action behavior, legacy manifest route/method actions,
+  and legacy input metadata compatibility while documenting runner safety
+  requirements and examples.
+
 ## 0.3.0 - 2026-06-18
 
 - Added EmDash-shaped `i18n` options with `locale`, `defaultLocale`,
