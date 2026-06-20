@@ -14,6 +14,8 @@
   result bodies using `status: 409`, warning severity, and reload effects.
 - Fixed dashboard and field action buttons with icons so they render the action
   label as visible button text instead of relying on Kumo's icon slot.
+- Fixed long dashboard and field action button labels so they wrap within
+  compact containers without exporting the internal button content helper.
 - Preserved direct-route action behavior, legacy manifest route/method actions,
   and legacy input metadata compatibility while documenting runner safety
   requirements and examples.
