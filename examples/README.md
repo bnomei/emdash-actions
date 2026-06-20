@@ -4,6 +4,12 @@ These examples show complete wiring for common `actions:button` use cases. Each
 recipe includes the backend route handler, the field or manifest JSON, and the
 frontend behavior the editor sees.
 
+Every action button needs visible command text. Manifest actions require a
+human-readable `label`; `actions:button` field options should include a
+field-local `label` when the field selects a manifest `action`. The outer field
+`label` names the field or slot, while the action label names the command. Icons
+are optional decoration only.
+
 Start with [Provider Setup](./provider-setup.md) when the button calls backend
 code. Clipboard-only field buttons do not need a provider route.
 
@@ -57,7 +63,8 @@ For example, this field action:
 ```json
 {
   "provider": "slug-actions",
-  "route": "field/slugify"
+  "route": "field/slugify",
+  "label": "Generate slug"
 }
 ```
 

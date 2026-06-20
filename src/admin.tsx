@@ -10,11 +10,22 @@ import {
   createKumoToastManager,
 } from "@cloudflare/kumo";
 import {
+  ActivityIcon,
+  ArrowCounterClockwiseIcon,
+  ArrowsClockwiseIcon,
   CheckCircleIcon,
+  ClockIcon,
   ClipboardTextIcon,
+  DownloadSimpleIcon,
+  EnvelopeIcon,
+  KeyIcon,
+  KeyholeIcon,
   LightningIcon,
+  LockIcon,
   PlayIcon,
+  PlusMinusIcon,
   PowerIcon,
+  RepeatIcon,
   WarningIcon,
   XCircleIcon,
 } from "@phosphor-icons/react";
@@ -249,6 +260,17 @@ const inlineCheckboxStyle = {
   display: "flex",
   gap: "0.45rem",
   minWidth: 0,
+} satisfies CSSProperties;
+
+const buttonContentStyle = {
+  alignItems: "center",
+  display: "inline-flex",
+  gap: "0.45rem",
+  minWidth: 0,
+} satisfies CSSProperties;
+
+const buttonLabelStyle = {
+  whiteSpace: "nowrap",
 } satisfies CSSProperties;
 
 function contextI18n(context: ActionButtonContext | undefined): ActionsI18nConfig | undefined {
@@ -546,6 +568,11 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
             const feedback = feedbackByKey[action.key] ?? null;
             const isBusy = isActionBusy(busyKeys, action.key);
             const formValues = dashboardFormValues(action, formValuesByKey[action.key]);
+            const actionDisplayLabel = actionLabel(action, i18n);
+            const buttonLabel =
+              feedback?.message ??
+              localizedString(action.form?.submitLabel, i18n) ??
+              actionDisplayLabel;
 
             return (
               <LayerCard key={action.key}>
@@ -553,7 +580,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
                   <div style={actionRowContentStyle}>
                     <div style={actionHeaderStyle}>
                       <div style={actionTextStyle}>
-                        <Text size="sm">{actionLabel(action, i18n)}</Text>
+                        <Text size="sm">{actionDisplayLabel}</Text>
                         {actionDescription(action, i18n) ? (
                           <Text size="xs" variant="secondary">
                             {actionDescription(action, i18n)}
@@ -576,17 +603,18 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
                     <Button
                       className={buttonClassName(feedback)}
                       disabled={isActionDisabled(busyKeys, action.key, action.disabled === true)}
-                      icon={buttonFeedbackIcon(action, feedback)}
                       loading={isBusy}
                       onClick={() => void runAction(action)}
                       style={buttonStyle(action, feedback)}
-                      title={feedback?.message}
+                      aria-label={buttonLabel}
+                      title={buttonLabel}
                       type="button"
                       variant={buttonVariant(feedback?.tone ?? action.tone, feedback)}
                     >
-                      {feedback?.message ??
-                        localizedString(action.form?.submitLabel, i18n) ??
-                        actionLabel(action, i18n)}
+                      <ActionButtonContent
+                        icon={buttonFeedbackIcon(action, feedback)}
+                        label={buttonLabel}
+                      />
                     </Button>
                   </div>
                 </LayerCard.Primary>
@@ -1007,6 +1035,8 @@ function ActionButtonFieldContent({
     (action ? actionLabel(action, i18n) : "") ||
     label ||
     fieldDefaultButtonLabel(mode, i18n);
+  const buttonText =
+    feedback?.message ?? localizedString(action?.form?.submitLabel, i18n) ?? buttonLabel;
   const description =
     localizedString(options?.description, i18n) || (action ? actionDescription(action, i18n) : "");
   const disabled = busy || options?.disabled === true || (mode === "run" && !action);
@@ -1039,20 +1069,32 @@ function ActionButtonFieldContent({
       <Button
         className={buttonClassName(feedback)}
         disabled={disabled || action?.disabled === true}
-        icon={fieldButtonFeedbackIcon(mode, action, options, feedback)}
         loading={busy}
         onClick={() => void runFieldAction()}
         style={buttonStyle(action, feedback, options)}
-        title={feedback?.message}
+        aria-label={buttonText}
+        title={buttonText}
         type="button"
         variant={buttonVariant(
           feedback?.tone ?? action?.tone ?? readOptionalFieldTone(options?.tone),
           feedback,
         )}
       >
-        {feedback?.message ?? localizedString(action?.form?.submitLabel, i18n) ?? buttonLabel}
+        <ActionButtonContent
+          icon={fieldButtonFeedbackIcon(mode, action, options, feedback)}
+          label={buttonText}
+        />
       </Button>
     </div>
+  );
+}
+
+function ActionButtonContent({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <span style={buttonContentStyle}>
+      {icon}
+      <span style={buttonLabelStyle}>{label}</span>
+    </span>
   );
 }
 
@@ -1492,8 +1534,21 @@ function fieldButtonIcon(
 }
 
 function fieldIcon(icon: string | undefined) {
+  if (icon === "activity" || icon === "pulse") return <ActivityIcon weight="bold" />;
+  if (icon === "refresh" || icon === "sync") return <ArrowsClockwiseIcon weight="bold" />;
+  if (icon === "clock") return <ClockIcon weight="bold" />;
   if (icon === "copy" || icon === "clipboard") return <ClipboardTextIcon weight="bold" />;
+  if (icon === "download") return <DownloadSimpleIcon weight="bold" />;
+  if (icon === "envelope" || icon === "email") return <EnvelopeIcon weight="bold" />;
+  if (icon === "key") return <KeyIcon weight="bold" />;
+  if (icon === "keyhole") return <KeyholeIcon weight="bold" />;
+  if (icon === "lock") return <LockIcon weight="bold" />;
+  if (icon === "plus-minus") return <PlusMinusIcon weight="bold" />;
   if (icon === "power") return <PowerIcon weight="bold" />;
+  if (icon === "repeat" || icon === "replay") return <RepeatIcon weight="bold" />;
+  if (icon === "arrow-counter-clockwise") {
+    return <ArrowCounterClockwiseIcon weight="bold" />;
+  }
   if (icon === "warning") return <WarningIcon weight="bold" />;
   if (icon === "check") return <CheckCircleIcon weight="bold" />;
   if (icon === "x" || icon === "close") return <XCircleIcon weight="bold" />;

@@ -141,7 +141,8 @@ Put this object inside the target collection schema's `fields` array.
     "mode": "run",
     "provider": "sandbox-time-actions",
     "manifestRoute": "actions",
-    "action": "time.copyServerTime"
+    "action": "time.copyServerTime",
+    "label": "Copy server time"
   }
 }
 ```

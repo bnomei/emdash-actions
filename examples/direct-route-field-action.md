@@ -69,6 +69,8 @@ async function slugifyRoute(ctx: RouteContext) {
 Put this object inside the target collection schema's `fields` array, for
 example in a seed JSON file or a project-local schema setup script.
 
+The field `label` is `Slug`; the button label is `Generate slug`.
+
 ```json
 {
   "slug": "slug",

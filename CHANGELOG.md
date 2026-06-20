@@ -12,6 +12,8 @@
   with required-field validation and form values merged into action payloads.
 - Added scoped reload effects and stale-target conflict semantics for action
   result bodies using `status: 409`, warning severity, and reload effects.
+- Fixed dashboard and field action buttons with icons so they render the action
+  label as visible button text instead of relying on Kumo's icon slot.
 - Preserved direct-route action behavior, legacy manifest route/method actions,
   and legacy input metadata compatibility while documenting runner safety
   requirements and examples.

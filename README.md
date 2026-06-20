@@ -160,21 +160,21 @@ button feedback plus toast.
 
 ## What To Use
 
-| Goal                                                 | Start here                                                           |
-| ---------------------------------------------------- | -------------------------------------------------------------------- |
-| Copy a value without backend code                    | [Clipboard Field Button](./examples/clipboard-field-button.md)       |
-| Call one backend route from a field                  | [Direct Route Field Action](./examples/direct-route-field-action.md) |
-| Let a provider own labels, icon, route, and feedback | [Manifest Field Action](./examples/manifest-field-action.md)         |
-| Use one safe provider-owned runner route             | [Runner Field Action](./examples/runner-field-action.md)             |
-| Add a runner-backed dashboard action                 | [Runner Dashboard Action](./examples/runner-dashboard-action.md)     |
-| Collect a few scalar inputs before submit            | [Inline Form Action](./examples/inline-form-action.md)               |
-| Target a host-provided nested row                    | [Row Target Action](./examples/row-target-action.md)                 |
-| Add a dashboard action                               | [Dashboard Action](./examples/dashboard-action.md)                   |
-| Return clipboard, open, download, or reload effects  | [Response effect examples](./examples/README.md)                     |
-| Show a Kumo toast                                    | [Toast Notification](./examples/toast-notification.md)               |
-| Patch a clicked button after success                 | [Action Patch](./examples/action-patch.md)                           |
-| Poll long-running work                               | [Async Job](./examples/async-job.md)                                 |
-| Run the provider in a sandbox                        | [Sandboxed Provider](./examples/sandboxed-provider.md)               |
+| Goal                                                | Start here                                                           |
+| --------------------------------------------------- | -------------------------------------------------------------------- |
+| Copy a value without backend code                   | [Clipboard Field Button](./examples/clipboard-field-button.md)       |
+| Call one backend route from a field                 | [Direct Route Field Action](./examples/direct-route-field-action.md) |
+| Use provider-owned action UI and routes             | [Manifest Field Action](./examples/manifest-field-action.md)         |
+| Use one safe provider-owned runner route            | [Runner Field Action](./examples/runner-field-action.md)             |
+| Add a runner-backed dashboard action                | [Runner Dashboard Action](./examples/runner-dashboard-action.md)     |
+| Collect a few scalar inputs before submit           | [Inline Form Action](./examples/inline-form-action.md)               |
+| Target a host-provided nested row                   | [Row Target Action](./examples/row-target-action.md)                 |
+| Add a dashboard action                              | [Dashboard Action](./examples/dashboard-action.md)                   |
+| Return clipboard, open, download, or reload effects | [Response effect examples](./examples/README.md)                     |
+| Show a Kumo toast                                   | [Toast Notification](./examples/toast-notification.md)               |
+| Patch a clicked button after success                | [Action Patch](./examples/action-patch.md)                           |
+| Poll long-running work                              | [Async Job](./examples/async-job.md)                                 |
+| Run the provider in a sandbox                       | [Sandboxed Provider](./examples/sandboxed-provider.md)               |
 
 The full recipe index is in [examples](./examples/README.md).
 
@@ -186,6 +186,22 @@ The full recipe index is in [examples](./examples/README.md).
   mode for browser-native copying and `run` mode for provider-backed actions.
 - `Actions`: dashboard widget for provider/global actions. It reads configured
   provider manifests and renders matching action buttons.
+
+### Action Labels And Icons
+
+Every action must have a human-readable `label`. The action `label` is the
+user-facing command text for the rendered button. `icon` is optional decoration
+only; it must not be the only visible affordance for the action.
+
+Field labels and action labels describe different things. The collection field
+`label` names the field or slot, while the manifest action `label` or field
+`options.label` names the command the button runs. They may match, but the
+button still renders the resolved action label as visible text.
+
+Idle buttons show the resolved action label. The button `title`, tooltip text,
+and `aria-label` use that same resolved label. Feedback, progress, success, and
+error text may temporarily replace or supplement the label after interaction,
+but the idle state should always remain clear.
 
 ### Providers And Manifests
 
@@ -200,6 +216,48 @@ A provider manifest describes buttons:
       route: "cache/clear",
       method: "POST",
       placement: "dashboard",
+    },
+  ],
+}
+```
+
+Use clear labels for every action surface:
+
+```ts
+{
+  actions: [
+    {
+      id: "cache.clear",
+      label: "Clear cache",
+      route: "cache/clear",
+      method: "POST",
+      placement: "dashboard",
+      target: { surfaces: ["dashboard"] },
+      icon: "bolt",
+    },
+    {
+      id: "entry.rebuild",
+      label: "Rebuild entry",
+      runner: { route: "actions/run-entry" },
+      placement: "entry",
+      target: { surfaces: ["entry"], idFrom: "entryId" },
+      icon: "refresh",
+    },
+    {
+      id: "field.summarize",
+      label: "Summarize field",
+      runner: true,
+      placement: "field",
+      target: { surfaces: ["field"], idFrom: "entryId" },
+      icon: "bolt",
+    },
+    {
+      id: "row.translate",
+      label: "Translate row",
+      runner: true,
+      placement: "field",
+      target: { surfaces: ["row"], idFrom: "rowId" },
+      icon: "repeat",
     },
   ],
 }
@@ -376,7 +434,8 @@ shape and caveats.
 ### Provider Options
 
 - `pluginId`: provider plugin id.
-- `label`: human-readable provider label.
+- `label`: human-readable provider label. This names the provider, not an
+  action button.
 - `manifestRoute`: provider route that returns the manifest. Defaults to
   `.well-known/actions`.
 - `runnerRoute`: provider route for `runner` actions. Defaults to
@@ -391,7 +450,11 @@ The most common field options are:
 - `provider` or `pluginId`: provider plugin id.
 - `route`: direct provider route.
 - `action`: provider manifest action id.
-- `label`, `description`, `icon`, `tone`, `confirm`: button UI.
+- `label`: field-local button command text. With `action`, this overrides the
+  manifest action label for this field. Without it, manifest-backed buttons use
+  the manifest action label.
+- `description`, `icon`, `tone`, `confirm`: button UI. `icon` is optional
+  decoration and the text label still renders.
 - `payload`: static JSON body values.
 - `valueKey`: include the current field value in the request body.
 - `contextKey` and `contextValueKey`: include inferred context in direct-route

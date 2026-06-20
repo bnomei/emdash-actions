@@ -4,6 +4,9 @@ Use `feedback` for temporary progress, success, and error labels. Use
 `buttonStyle` for the resting button color, and response color fields for the
 temporary terminal feedback color.
 
+The resting button still needs a clear action label. Feedback text may
+temporarily replace it after the editor clicks the button.
+
 ## Files Used
 
 - `src/emdash/quality-actions.ts`: define the provider plugin, manifest route,
@@ -104,7 +107,8 @@ example in a seed JSON file or a project-local schema setup script.
     "mode": "run",
     "provider": "quality-actions",
     "manifestRoute": "actions",
-    "action": "quality.check"
+    "action": "quality.check",
+    "label": "Run quality check"
   }
 }
 ```

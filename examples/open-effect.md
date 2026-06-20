@@ -92,7 +92,8 @@ example in a seed JSON file or a project-local schema setup script.
     "mode": "run",
     "provider": "media-shortcut-actions",
     "manifestRoute": "actions",
-    "action": "admin.openMedia"
+    "action": "admin.openMedia",
+    "label": "Open media library"
   }
 }
 ```

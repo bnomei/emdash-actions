@@ -130,6 +130,7 @@ async function summarizeField(
     "mode": "run",
     "provider": "editor-actions",
     "action": "field.summarize",
+    "label": "Summarize",
     "payload": {
       "format": "short"
     },
@@ -146,8 +147,9 @@ The button first loads:
 GET /_emdash/api/plugins/editor-actions/.well-known/actions
 ```
 
-It finds `field.summarize`, renders the provider-owned label and styling, then
-posts the normalized invocation to the fixed runner route:
+It finds `field.summarize`, renders `Summarize` as the visible button label with
+the provider-owned styling, then posts the normalized invocation to the fixed
+runner route:
 
 ```txt
 POST /_emdash/api/plugins/editor-actions/.well-known/actions/run

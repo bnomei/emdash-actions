@@ -123,7 +123,8 @@ example in a seed JSON file or a project-local schema setup script.
     "mode": "run",
     "provider": "export-actions",
     "manifestRoute": "actions",
-    "action": "exports.downloadLatest"
+    "action": "exports.downloadLatest",
+    "label": "Download latest export"
   }
 }
 ```

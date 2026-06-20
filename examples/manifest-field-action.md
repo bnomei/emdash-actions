@@ -117,6 +117,7 @@ example in a seed JSON file or a project-local schema setup script.
     "provider": "title-actions",
     "manifestRoute": "actions",
     "action": "field.normalizeTitle",
+    "label": "Normalize title",
     "valueKey": "value",
     "resultValueKey": "title"
   }
@@ -131,8 +132,8 @@ The button first loads:
 GET /_emdash/api/plugins/title-actions/actions
 ```
 
-It finds `field.normalizeTitle`, renders the provider-owned label and styling,
-then calls:
+It finds `field.normalizeTitle`, renders `Normalize title` as the visible button
+label with the provider-owned styling, then calls:
 
 ```txt
 POST /_emdash/api/plugins/title-actions/field/normalize-title

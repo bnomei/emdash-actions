@@ -109,8 +109,9 @@ collection schema.
 ## Frontend Behavior
 
 After a successful click, the widget merges `response.action` into the clicked
-button. The new label, icon, tone, and confirmation prompt stay visible until
-the dashboard reloads.
+button. The new `label` becomes the stable visible command text. The new `icon`
+is decorative and stays next to that label, along with the updated tone and
+confirmation prompt, until the dashboard reloads.
 
 The provider manifest should also read persisted state and return the current
 label. That keeps a full dashboard reload consistent with the last action

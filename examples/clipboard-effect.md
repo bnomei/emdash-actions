@@ -99,7 +99,8 @@ example in a seed JSON file or a project-local schema setup script.
     "mode": "run",
     "provider": "preview-url-actions",
     "manifestRoute": "actions",
-    "action": "entry.copyPreviewUrl"
+    "action": "entry.copyPreviewUrl",
+    "label": "Copy preview URL"
   }
 }
 ```

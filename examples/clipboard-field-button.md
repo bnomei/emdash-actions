@@ -17,6 +17,9 @@ browser. It does not call a backend route.
 Put each object below inside the target collection schema's `fields` array, for
 example in a seed JSON file or a project-local schema setup script.
 
+The outer field `label` names the field slot in the form. `options.label` is the
+visible button command text.
+
 Copy a configured literal value:
 
 ```json
