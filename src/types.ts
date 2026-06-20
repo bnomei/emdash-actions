@@ -9,29 +9,80 @@ export type ActionDescriptorMode = "direct" | "runner";
 export type ActionResultMode = "emdash-action-result-v1" | "emdash-action-accepted-v1";
 export type ActionToastType = ActionTone | "success" | "error";
 export type ActionResultOpenTarget = "self" | "blank";
+export type ActionReloadScope = "field" | "entry" | "dashboard" | "page";
 export type ActionTarget =
-  | { type: "dashboard" }
-  | { type: "entry"; collection: string; entryId: string; locale?: string | null }
+  | { type: "dashboard"; surface: "dashboard"; kind: "dashboard" | (string & {}) }
+  | {
+      type: "entry";
+      surface: "entry";
+      collection: string;
+      entryId: string;
+      locale?: string | null;
+      kind?: string;
+    }
   | {
       type: "field";
+      surface: "field";
       collection?: string;
       entryId?: string;
       locale?: string | null;
       fieldName?: string;
+      kind?: string;
       value?: unknown;
     }
   | {
       type: "row";
+      surface: "row";
       collection?: string;
       entryId?: string;
       locale?: string | null;
       fieldName?: string;
+      kind?: string;
       rowId?: string;
-      row?: Record<string, unknown>;
+      path: string;
+      value?: unknown;
     };
 export type ActionTargetType = ActionTarget["type"];
+export interface ActionRunnerMetadata {
+  route?: string;
+}
+export interface ActionTargetMetadata {
+  surfaces?: readonly ActionTargetType[];
+  kind?: string;
+  required?: boolean;
+  idKeys?: readonly string[];
+  idFrom?: string;
+}
+export type ActionFormFieldType =
+  | "string"
+  | "number"
+  | "integer"
+  | "boolean"
+  | "datetime"
+  | "select";
+export type ActionFormOptionValue = string | number | boolean;
+export interface ActionFormOptionObject {
+  value: ActionFormOptionValue;
+  label?: LocalizedString;
+}
+export type ActionFormOption = ActionFormOptionValue | ActionFormOptionObject;
+export interface ActionFormField {
+  name: string;
+  label?: LocalizedString;
+  description?: LocalizedString;
+  type?: ActionFormFieldType;
+  required?: boolean;
+  default?: unknown;
+  options?: readonly ActionFormOption[];
+}
+export interface ActionFormMetadata {
+  mode: "inline";
+  fields: readonly ActionFormField[];
+  submitLabel?: LocalizedString;
+}
 export type ActionTargetRequirement = ActionTargetType | ActionTargetType[];
-export type ActionInputType = "string" | "number" | "boolean" | "json";
+export type ActionTargetMetadataInput = ActionTargetMetadata | ActionTargetRequirement;
+export type ActionInputType = ActionFormFieldType | "json";
 export interface ActionInputField {
   name: string;
   label?: LocalizedString;
@@ -41,9 +92,10 @@ export interface ActionInputField {
   default?: unknown;
 }
 export interface ActionInputMetadata {
-  fields?: ActionInputField[];
+  fields?: readonly ActionInputField[];
 }
 export interface ActionInvocation {
+  invocationId: string;
   actionId: string;
   payload?: Record<string, unknown>;
   context?: ActionButtonContext;
@@ -67,6 +119,7 @@ export type ActionJobStatus =
 
 export interface ActionButtonContext {
   surface: ActionSurface;
+  kind?: string;
   collection?: string;
   collectionLabel?: string;
   fieldName?: string;
@@ -94,6 +147,11 @@ export interface ActionButtonContext {
   };
   translations?: unknown[];
   formData?: Record<string, unknown>;
+  path?: string;
+  row?: Record<string, unknown>;
+  rowId?: string;
+  rowPath?: string;
+  rowValue?: unknown;
   [key: string]: unknown;
 }
 
@@ -127,7 +185,7 @@ export interface ActionResultActionPatch {
 }
 
 export interface ActionResultEffects {
-  reload?: boolean | { delayMs?: number };
+  reload?: boolean | { scope?: ActionReloadScope; delayMs?: number };
   open?: string | { url: string; target?: ActionResultOpenTarget };
   download?: string | { url?: string; route?: string; filename?: string };
   clipboard?: string | { text: string };
@@ -173,12 +231,14 @@ export interface ActionDescriptorBase {
   resultEffect?: ActionResultEffectPreset;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
-  target?: ActionTargetRequirement;
+  target?: ActionTargetMetadataInput;
+  form?: ActionFormMetadata;
   input?: ActionInputMetadata;
 }
 
 export interface ActionDescriptor extends ActionDescriptorBase {
   mode?: "direct";
+  runner?: never;
   route: string;
   method?: ActionMethod;
   pluginId?: string;
@@ -186,12 +246,23 @@ export interface ActionDescriptor extends ActionDescriptorBase {
 
 export type DirectActionDescriptor = ActionDescriptor;
 
-export interface RunnerActionDescriptor extends ActionDescriptorBase {
-  mode: "runner";
+export interface CanonicalRunnerActionDescriptor extends ActionDescriptorBase {
+  runner: true | ActionRunnerMetadata;
+  mode?: "runner";
   method?: never;
   pluginId?: never;
   route?: never;
 }
+
+export interface LegacyRunnerActionDescriptor extends ActionDescriptorBase {
+  mode: "runner";
+  runner?: true | ActionRunnerMetadata;
+  method?: never;
+  pluginId?: never;
+  route?: never;
+}
+
+export type RunnerActionDescriptor = CanonicalRunnerActionDescriptor | LegacyRunnerActionDescriptor;
 
 export type ActionManifestDescriptor = ActionDescriptor | RunnerActionDescriptor;
 

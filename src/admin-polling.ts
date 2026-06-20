@@ -1,6 +1,6 @@
 import { normalizePluginRoute } from "./shared";
 import { sleep as defaultSleep, throwIfAborted } from "./admin-cancellation";
-import { numberOrNull } from "./admin-manifest";
+import { asRecord, numberOrNull } from "./admin-manifest";
 import type { ActionManifestDescriptor, ActionRunResult } from "./types";
 import { localizedString } from "./i18n";
 
@@ -120,6 +120,7 @@ export function resultPhase(result: ActionRunResult): "progress" | "success" | "
 }
 
 export function isErrorResult(result: ActionRunResult) {
+  if (isConflictReloadResult(result)) return false;
   const jobStatus = readJobStatus(result);
   if (jobStatus && FAILED_JOB_STATUSES.has(jobStatus)) return true;
   if (result.ok === false) return true;
@@ -138,4 +139,12 @@ export function resultToneStatus(result: ActionRunResult) {
   if (jobStatus && PENDING_JOB_STATUSES.has(jobStatus)) return "info";
   if (result.ok === false) return "error";
   return null;
+}
+
+export function isConflictReloadResult(result: ActionRunResult) {
+  return result.status === 409 && result.severity === "warning" && hasReloadEffect(result);
+}
+
+function hasReloadEffect(result: ActionRunResult) {
+  return result.reload !== undefined || asRecord(result.effects)?.reload !== undefined;
 }

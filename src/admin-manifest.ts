@@ -5,6 +5,11 @@ import type {
   ActionButtonStyle,
   ActionDescriptorMode,
   ActionFeedbackOptions,
+  ActionFormField,
+  ActionFormFieldType,
+  ActionFormMetadata,
+  ActionFormOption,
+  ActionFormOptionValue,
   ActionInputField,
   ActionInputMetadata,
   ActionInputType,
@@ -13,7 +18,8 @@ import type {
   ActionProviderConfig,
   ActionResultEffectPreset,
   ActionResultOpenTarget,
-  ActionTargetRequirement,
+  ActionRunnerMetadata,
+  ActionTargetMetadata,
   ActionTargetType,
   ActionsManifest,
   ActionTone,
@@ -25,12 +31,30 @@ const ACTION_METHODS = new Set<ActionMethod>(["POST", "PUT", "PATCH", "DELETE"])
 const ACTION_BUTTON_MODES = new Set<ActionButtonMode>(["run", "clipboard"]);
 const ACTION_DESCRIPTOR_MODES = new Set<ActionDescriptorMode>(["direct", "runner"]);
 const ACTION_TARGET_TYPES = new Set<ActionTargetType>(["dashboard", "entry", "field", "row"]);
-const ACTION_INPUT_TYPES = new Set<ActionInputType>(["string", "number", "boolean", "json"]);
+const ACTION_FORM_FIELD_TYPES = new Set<ActionFormFieldType>([
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "datetime",
+  "select",
+]);
+const ACTION_INPUT_TYPES = new Set<ActionInputType>([
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "datetime",
+  "select",
+  "json",
+]);
 const ACTION_TONES = new Set<ActionTone>(["default", "positive", "warning", "danger", "info"]);
 const ACTION_RESULT_EFFECT_PRESETS = new Set(["clipboard", "copy", "open", "download"]);
 const ACTION_RESULT_OPEN_TARGETS = new Set<ActionResultOpenTarget>(["self", "blank"]);
+const ACTION_FORM_MODES = new Set<ActionFormMetadata["mode"]>(["inline"]);
 const MAX_ACTIONS_PER_PROVIDER = 50;
 const MAX_STRING_LENGTH = 220;
+const ACTION_FORM_FIELD_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$/;
 
 export function parseActionsManifest(
   value: unknown,
@@ -67,8 +91,14 @@ function parseActionDescriptor(
 
   const mode = readActionDescriptorMode(record.mode);
   const payload = readPayload(record.payload);
-  const target = readOptionalTargetRequirement(record.target, "target");
+  const runner = readOptionalRunner(record.runner, "runner");
+  const target = readOptionalTargetMetadata(record.target, "target");
+  const form = readOptionalForm(record.form, "form");
   const input = readOptionalInput(record.input, "input");
+  const isRunner = runner !== undefined || mode === "runner";
+  if (runner !== undefined && mode === "direct") {
+    throw new Error("Runner action must not use direct mode");
+  }
 
   const action = {
     id: readRequiredString(record.id, "id"),
@@ -82,6 +112,7 @@ function parseActionDescriptor(
     disabled: readOptionalBoolean(record.disabled, "disabled"),
     feedback: readOptionalFeedback(record.feedback, "feedback"),
     icon: readOptionalString(record.icon, "icon"),
+    form,
     input,
     payload,
     placement: readOptionalString(record.placement, "placement"),
@@ -93,7 +124,7 @@ function parseActionDescriptor(
     tone: readTone(record.tone),
   };
 
-  if (mode === "runner") {
+  if (isRunner) {
     if (record.route !== undefined && record.route !== null) {
       throw new Error("Runner action must not define route");
     }
@@ -105,7 +136,8 @@ function parseActionDescriptor(
     }
     return {
       ...action,
-      mode,
+      ...(mode === "runner" ? { mode } : {}),
+      runner: runner ?? true,
     };
   }
 
@@ -228,28 +260,93 @@ function readTargetType(value: unknown, field: string): ActionTargetType {
   return targetType as ActionTargetType;
 }
 
-function readOptionalTargetRequirement(
+function readOptionalRunner(
   value: unknown,
   field: string,
-): ActionTargetRequirement | undefined {
+): true | ActionRunnerMetadata | undefined {
   if (value === undefined || value === null) return undefined;
-  if (typeof value === "string") return readTargetType(value, field);
-  if (!Array.isArray(value)) throw new Error(`Action ${field} must be a string or array`);
+  if (value === true) return true;
+  if (value !== false) {
+    const record = asRecord(value);
+    if (!record) throw new Error(`Action ${field} must be true or an object`);
+    const route = readOptionalString(record.route, `${field}.route`);
+    return route ? { route: normalizePluginRoute(route) } : {};
+  }
+  throw new Error(`Action ${field} must be true or an object`);
+}
 
-  const targetTypes = value.map((item, index) => readTargetType(item, `${field}.${index}`));
-  return [...new Set(targetTypes)];
+function readOptionalTargetMetadata(
+  value: unknown,
+  field: string,
+): ActionTargetMetadata | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return { surfaces: [readTargetType(value, field)] };
+  if (Array.isArray(value)) {
+    return {
+      surfaces: [...new Set(value.map((item, index) => readTargetType(item, `${field}.${index}`)))],
+    };
+  }
+
+  const record = asRecord(value);
+  if (!record) throw new Error(`Action ${field} must be a string, array, or object`);
+
+  const target: ActionTargetMetadata = {};
+  const surfaces = readOptionalTargetSurfaces(record.surfaces, `${field}.surfaces`);
+  const kind = readOptionalString(record.kind, `${field}.kind`);
+  const required = readOptionalBoolean(record.required, `${field}.required`);
+  const idKeys = readOptionalStringArray(record.idKeys, `${field}.idKeys`);
+  const idFrom = readOptionalString(record.idFrom, `${field}.idFrom`);
+
+  if (surfaces) target.surfaces = surfaces;
+  if (kind) target.kind = kind;
+  if (required !== undefined) target.required = required;
+  if (idKeys) target.idKeys = idKeys;
+  if (idFrom) target.idFrom = idFrom;
+  return Object.keys(target).length > 0 ? target : {};
+}
+
+function readOptionalTargetSurfaces(
+  value: unknown,
+  field: string,
+): readonly ActionTargetType[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error(`Action ${field} must be an array`);
+  return [...new Set(value.map((item, index) => readTargetType(item, `${field}.${index}`)))];
+}
+
+function readOptionalStringArray(value: unknown, field: string): readonly string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error(`Action ${field} must be an array`);
+  return value.map((item, index) => readRequiredString(item, `${field}.${index}`));
+}
+
+function readOptionalForm(value: unknown, field: string): ActionFormMetadata | undefined {
+  if (value === undefined || value === null) return undefined;
+  const record = asRecord(value);
+  if (!record) throw new Error(`Action ${field} must be an object`);
+
+  const mode = readFormMode(record.mode, `${field}.mode`);
+  const fields = readFormFields(record.fields, `${field}.fields`);
+  const submitLabel = readOptionalLocalizedString(record.submitLabel, `${field}.submitLabel`);
+  return {
+    mode,
+    fields,
+    ...(submitLabel ? { submitLabel } : {}),
+  };
 }
 
 function readOptionalInput(value: unknown, field: string): ActionInputMetadata | undefined {
   if (value === undefined || value === null) return undefined;
   const record = asRecord(value);
   if (!record) throw new Error(`Action ${field} must be an object`);
-
   const fields = readOptionalInputFields(record.fields, `${field}.fields`);
   return fields ? { fields } : {};
 }
 
-function readOptionalInputFields(value: unknown, field: string): ActionInputField[] | undefined {
+function readOptionalInputFields(
+  value: unknown,
+  field: string,
+): readonly ActionInputField[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) throw new Error(`Action ${field} must be an array`);
 
@@ -276,6 +373,90 @@ function readOptionalInputFields(value: unknown, field: string): ActionInputFiel
 
     return input;
   });
+}
+
+function readFormMode(value: unknown, field: string): ActionFormMetadata["mode"] {
+  if (value === undefined || value === null) return "inline";
+  if (typeof value !== "string") throw new Error(`Action ${field} must be a string`);
+  const mode = value.trim();
+  if (!ACTION_FORM_MODES.has(mode as ActionFormMetadata["mode"])) {
+    throw new Error(`Unsupported action ${field}: ${value}`);
+  }
+  return mode as ActionFormMetadata["mode"];
+}
+
+function readFormFields(value: unknown, field: string): readonly ActionFormField[] {
+  if (!Array.isArray(value)) throw new Error(`Action ${field} must be an array`);
+
+  return value.map((item, index) => {
+    const record = asRecord(item);
+    if (!record) throw new Error(`Action ${field}.${index} must be an object`);
+
+    const name = readRequiredString(record.name, `${field}.${index}.name`);
+    if (!ACTION_FORM_FIELD_NAME_PATTERN.test(name)) {
+      throw new Error(`Action ${field}.${index}.name is invalid`);
+    }
+
+    const input: ActionFormField = {
+      name,
+    };
+    const label = readOptionalLocalizedString(record.label, `${field}.${index}.label`);
+    const description = readOptionalLocalizedString(
+      record.description,
+      `${field}.${index}.description`,
+    );
+    const type = readOptionalFormFieldType(record.type, `${field}.${index}.type`);
+    const required = readOptionalBoolean(record.required, `${field}.${index}.required`);
+    const options = readOptionalFormOptions(record.options, `${field}.${index}.options`);
+
+    if (label) input.label = label;
+    if (description) input.description = description;
+    if (type) input.type = type;
+    if (required !== undefined) input.required = required;
+    if (options) input.options = options;
+    if (Object.hasOwn(record, "default")) input.default = record.default;
+    if ((input.type ?? "string") === "select" && (!input.options || input.options.length === 0)) {
+      throw new Error(`Action ${field}.${index}.options is required for select fields`);
+    }
+
+    return input;
+  });
+}
+
+function readOptionalFormOptions(
+  value: unknown,
+  field: string,
+): readonly ActionFormOption[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error(`Action ${field} must be an array`);
+  return value.map((item, index) => {
+    if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+      return { value: item };
+    }
+
+    const record = asRecord(item);
+    if (!record) throw new Error(`Action ${field}.${index} must be a scalar or object`);
+    const value = readFormOptionValue(record.value, `${field}.${index}.value`);
+    const label = readOptionalLocalizedString(record.label, `${field}.${index}.label`);
+    return label ? { label, value } : { value };
+  });
+}
+
+function readFormOptionValue(value: unknown, field: string): ActionFormOptionValue {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  throw new Error(`Action ${field} must be a string, number, or boolean`);
+}
+
+function readOptionalFormFieldType(value: unknown, field: string): ActionFormFieldType | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new Error(`Action ${field} must be a string`);
+  const inputType = value.trim();
+  if (!ACTION_FORM_FIELD_TYPES.has(inputType as ActionFormFieldType)) {
+    throw new Error(`Unsupported action ${field}: ${value}`);
+  }
+  return inputType as ActionFormFieldType;
 }
 
 function readOptionalInputType(value: unknown, field: string): ActionInputType | undefined {

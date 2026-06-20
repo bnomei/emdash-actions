@@ -166,6 +166,9 @@ button feedback plus toast.
 | Call one backend route from a field                  | [Direct Route Field Action](./examples/direct-route-field-action.md) |
 | Let a provider own labels, icon, route, and feedback | [Manifest Field Action](./examples/manifest-field-action.md)         |
 | Use one safe provider-owned runner route             | [Runner Field Action](./examples/runner-field-action.md)             |
+| Add a runner-backed dashboard action                 | [Runner Dashboard Action](./examples/runner-dashboard-action.md)     |
+| Collect a few scalar inputs before submit            | [Inline Form Action](./examples/inline-form-action.md)               |
+| Target a host-provided nested row                    | [Row Target Action](./examples/row-target-action.md)                 |
 | Add a dashboard action                               | [Dashboard Action](./examples/dashboard-action.md)                   |
 | Return clipboard, open, download, or reload effects  | [Response effect examples](./examples/README.md)                     |
 | Show a Kumo toast                                    | [Toast Notification](./examples/toast-notification.md)               |
@@ -224,11 +227,15 @@ Manifest actions can also use runner mode:
   actions: [
     {
       id: "field.summarize",
-      mode: "runner",
+      runner: true,
       label: "Summarize",
       placement: "field",
-      target: "field",
+      target: { surfaces: ["field"], idFrom: "entryId" },
       payload: { format: "short" },
+      form: {
+        mode: "inline",
+        fields: [{ name: "format", type: "select", options: ["short", "long"] }],
+      },
     },
   ],
 }
@@ -244,12 +251,14 @@ with a normalized invocation:
 
 ```json
 {
+  "invocationId": "inv_...",
   "actionId": "field.summarize",
   "payload": {
-    "format": "short"
+    "format": "long"
   },
   "target": {
     "type": "field",
+    "surface": "field",
     "collection": "posts",
     "entryId": "post-1",
     "fieldName": "summary",
@@ -264,6 +273,22 @@ server-side action registry and avoid exposing one callable route per button.
 Runner providers must treat `actionId` as an identifier only, look it up in that
 registry, authorize it server-side, and re-read target documents before mutating
 content or protected state.
+
+Runner actions may use the provider default runner route or override it per
+action:
+
+```ts
+{ id: "entry.rebuild", runner: { route: "actions/run-entry" }, label: "Rebuild" }
+```
+
+`payload` is only static action input defaults. Inline `form` values and field
+option payload values are merged into the request payload at submit time, and
+user-provided form values win over defaults. `context` and `target` stay
+top-level in runner invocations.
+
+`target.idFrom` and `target.idKeys` can produce client-side missing-target
+warnings before a request is sent. They are ergonomics only: provider runners
+must re-read and validate the authoritative target server-side.
 
 > [!IMPORTANT]
 > Field JSON belongs in the target collection schema's `fields` array. It does
@@ -284,8 +309,15 @@ effects:
 - `action` patches the stable clicked button descriptor, useful for toggles.
 - `effects` or top-level aliases can run `clipboard`, `open`, `download`, and
   `reload`.
+- `effects.reload` accepts `true` or `{ scope, delayMs }`, where `scope` is
+  `field`, `entry`, `dashboard`, or `page`. Scoped reloads dispatch the
+  cancelable `emdash-actions:reload` browser event so hosts can refresh a
+  narrower surface; if unhandled, they fall back to a page reload.
 - `toast` shows a Kumo toast.
 - `status: 202`, `jobStatus`, and `statusRoute` start async polling.
+- An action result body with `status: 409`, `severity: "warning"`, and a reload
+  effect is the canonical stale-target conflict result. Return this as the
+  normal JSON action response body so the widget can run result effects.
 - `resultValueKey` on a field button can write a returned value back into the
   field.
 
@@ -300,11 +332,15 @@ See the focused response recipes for complete payloads:
 
 ### Entry Context
 
-Field buttons can include inferred entry context in the action payload with
-`contextKey` and `contextValueKey`. Without a host-provided field-widget context,
-the plugin infers what it can from the admin route and saved EmDash APIs:
-collection, entry id, new/edit state, field name, current field value, saved
-entry data, and current user when available.
+Field buttons can use inferred entry context. For direct-route actions,
+`contextKey` and `contextValueKey` merge that context into the flat request
+payload for compatibility. Runner actions keep the same context top-level in the
+`ActionInvocation` body instead of hiding it inside `payload`.
+
+Without a host-provided field-widget context, the plugin infers what it can from
+the admin route and saved EmDash APIs: collection, entry id, new/edit state,
+field name, current field value, saved entry data, and current user when
+available.
 
 > [!WARNING]
 > Entry context is best-effort. It cannot infer live unsaved values from sibling
@@ -343,7 +379,7 @@ shape and caveats.
 - `label`: human-readable provider label.
 - `manifestRoute`: provider route that returns the manifest. Defaults to
   `.well-known/actions`.
-- `runnerRoute`: provider route for `mode: "runner"` actions. Defaults to
+- `runnerRoute`: provider route for `runner` actions. Defaults to
   `.well-known/actions/run`.
 - `allowedTargetPluginIds`: cross-plugin route targets this provider may call.
 
@@ -358,7 +394,8 @@ The most common field options are:
 - `label`, `description`, `icon`, `tone`, `confirm`: button UI.
 - `payload`: static JSON body values.
 - `valueKey`: include the current field value in the request body.
-- `contextKey` and `contextValueKey`: include inferred context.
+- `contextKey` and `contextValueKey`: include inferred context in direct-route
+  payloads. Runner actions receive context top-level.
 - `resultValueKey`: write a returned result value back into the field.
 - `clipboardText`, `clipboardValueKey`, `clipboardContextValueKey`,
   `clipboardSuccess`: clipboard mode.

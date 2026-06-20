@@ -21,6 +21,7 @@ import type {
   ActionResultEffects,
   ActionResultOpenTarget,
   ActionRunResult,
+  ActionReloadScope,
 } from "./types";
 
 export type ActionEffectTarget = ActionManifestDescriptor & {
@@ -33,11 +34,16 @@ type DownloadEffect = {
   url?: string;
 };
 
+export type ReloadEffect = {
+  scope?: ActionReloadScope;
+  delayMs?: number;
+};
+
 type ActionEffectDependencies = {
   writeClipboardText?: (text: string) => Promise<void>;
   runDownloadEffect?: (action: ActionEffectTarget, effect: DownloadEffect) => Promise<void>;
   runOpenEffect?: (effect: { url: string; target: ActionResultOpenTarget }) => void;
-  scheduleReload?: (action: ActionManifestDescriptor, delayMs: number | undefined) => void;
+  scheduleReload?: (action: ActionManifestDescriptor, effect: ReloadEffect) => void;
 };
 
 export function normalizeActionRunResult(
@@ -197,7 +203,7 @@ export async function runActionEffects(
   if (open) runOpen(open);
 
   const reloadEffect = asReloadEffect(effects.reload);
-  if (reloadEffect) reload(action, reloadEffect.delayMs);
+  if (reloadEffect) reload(action, reloadEffect);
 }
 
 export function actionResultEffects(result: ActionRunResult): ActionResultEffects | null {
@@ -260,9 +266,20 @@ export function asReloadEffect(value: ActionResultEffects["reload"] | undefined)
 
   const record = asRecord(value);
   if (!record) throw new Error("Reload effect must be true or an object.");
+  const scope = readReloadScope(record.scope);
   return {
+    ...(scope ? { scope } : {}),
     delayMs: readOptionalNumber(record.delayMs, "effects.reload.delayMs"),
   };
+}
+
+function readReloadScope(value: unknown): ActionReloadScope | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new Error("Reload scope must be a string");
+  if (value === "field" || value === "entry" || value === "dashboard" || value === "page") {
+    return value;
+  }
+  throw new Error(`Unsupported reload scope: ${value}`);
 }
 
 export function runOpenEffect(effect: { url: string; target: ActionResultOpenTarget }) {
@@ -310,12 +327,34 @@ export function triggerDownload(url: string, filename: string | undefined) {
 
 export function scheduleReload(
   action: Pick<ActionManifestDescriptor, "cooldownMs">,
-  delayMs: number | undefined,
+  effect: ReloadEffect | number | undefined,
 ) {
+  const reloadEffect = typeof effect === "number" ? { delayMs: effect } : (effect ?? {});
+  const delayMs = reloadEffect.delayMs;
   const delay = clampFeedbackMs(delayMs ?? feedbackCooldownMs(action));
   globalThis.setTimeout(() => {
-    globalThis.location.reload();
+    const scope = reloadEffect.scope ?? "page";
+    const shouldContinue = dispatchReloadEvent(action, { ...reloadEffect, scope });
+    if (shouldContinue) globalThis.location?.reload();
   }, delay);
+}
+
+function dispatchReloadEvent(
+  action: Pick<ActionManifestDescriptor, "cooldownMs">,
+  effect: ReloadEffect & { scope: ActionReloadScope },
+) {
+  if (typeof globalThis.dispatchEvent !== "function" || typeof CustomEvent === "undefined") {
+    return true;
+  }
+  return globalThis.dispatchEvent(
+    new CustomEvent("emdash-actions:reload", {
+      cancelable: true,
+      detail: {
+        action,
+        scope: effect.scope,
+      },
+    }),
+  );
 }
 
 export function safeBrowserUrl(value: string) {

@@ -122,7 +122,13 @@ export async function resolveDashboardContext(signal?: AbortSignal): Promise<Act
 }
 
 export function dashboardActionTarget(context: ActionButtonContext | undefined): ActionTarget {
-  return actionTargetFromContext(context) ?? { type: "dashboard" };
+  return (
+    actionTargetFromContext(context) ?? {
+      kind: "dashboard",
+      surface: "dashboard",
+      type: "dashboard",
+    }
+  );
 }
 
 export function fieldActionTarget(
@@ -142,10 +148,12 @@ export function fieldActionTarget(
   const route = readEntryContextRoute();
   return compactTarget({
     type: "field",
+    surface: "field",
     collection: context?.collection ?? route.collection,
     entryId: context?.entryId ?? route.entryId,
     locale: context?.entryLocale ?? route.entryLocale,
     fieldName: context?.fieldName ?? fieldNameFromId(input.id),
+    kind: context?.kind ?? context?.fieldKind,
     value: context?.fieldValue !== undefined ? context.fieldValue : input.value,
   });
 }
@@ -155,34 +163,63 @@ export function actionTargetFromContext(
 ): ActionTarget | undefined {
   if (!context) return undefined;
 
-  if (context.surface === "dashboard") return { type: "dashboard" };
+  if (context.surface === "dashboard") {
+    return {
+      type: "dashboard",
+      surface: "dashboard",
+      kind: context.kind ?? "dashboard",
+    };
+  }
   if (context.surface === "entry") {
     if (!context.collection || !context.entryId) return undefined;
     return compactTarget({
       type: "entry",
+      surface: "entry",
       collection: context.collection,
       entryId: context.entryId,
       locale: context.entryLocale,
+      kind: context.kind,
     });
   }
   if (context.surface === "row") {
+    const row = asRecord(context.row);
+    const value =
+      context.rowValue !== undefined
+        ? context.rowValue
+        : row !== null
+          ? row
+          : context.fieldValue !== undefined
+            ? context.fieldValue
+            : context.value;
     return compactTarget({
       type: "row",
+      surface: "row",
       collection: context.collection,
       entryId: context.entryId,
       locale: context.entryLocale,
       fieldName: context.fieldName,
-      rowId: cleanOptionalString(context.rowId),
-      row: asRecord(context.row) ?? undefined,
+      kind: context.kind ?? context.fieldKind,
+      rowId:
+        cleanOptionalString(context.rowId) ??
+        cleanOptionalString(readPath(row, "id")) ??
+        cleanOptionalString(readPath(value, "id")),
+      path:
+        cleanOptionalString(context.path) ??
+        cleanOptionalString(context.rowPath) ??
+        cleanOptionalString(context.fieldName) ??
+        "",
+      value,
     });
   }
 
   return compactTarget({
     type: "field",
+    surface: "field",
     collection: context.collection,
     entryId: context.entryId,
     locale: context.entryLocale,
     fieldName: context.fieldName,
+    kind: context.kind ?? context.fieldKind,
     value: context.fieldValue,
   });
 }

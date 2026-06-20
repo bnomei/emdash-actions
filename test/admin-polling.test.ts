@@ -85,9 +85,19 @@ describe("admin action polling", () => {
     expect(shouldContinuePolling({ jobStatus: "running", ok: true, status: 200 })).toBe(true);
     expect(isErrorResult({ jobStatus: "failed", ok: true, status: 200 })).toBe(true);
     expect(isErrorResult({ ok: false, status: 200 })).toBe(true);
+    expect(
+      isErrorResult({ effects: { reload: { scope: "entry" } }, severity: "warning", status: 409 }),
+    ).toBe(false);
     expect(isSuccessfulTerminalResult({ jobStatus: "succeeded", ok: true, status: 200 })).toBe(
       true,
     );
+    expect(
+      isSuccessfulTerminalResult({
+        effects: { reload: { scope: "entry" } },
+        severity: "warning",
+        status: 409,
+      }),
+    ).toBe(true);
   });
 
   it("clamps poll delays from result and action options", () => {

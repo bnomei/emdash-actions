@@ -30,9 +30,12 @@ import {
   resolveFieldContext,
 } from "./admin-context";
 import {
+  actionFormInitialValues,
+  actionFormPayload,
   actionMatchesTargetRequirement,
   actionRequestInit,
   actionRequestRoute,
+  actionSubmitValidationError,
 } from "./admin-invocation";
 import {
   actionPatchChangesLabel,
@@ -92,6 +95,7 @@ import type {
   ActionButtonStyle,
   ActionButtonContext,
   ActionButtonFieldOptions,
+  ActionFormField,
   ActionJobStatus,
   ActionManifestDescriptor,
   ActionProviderConfig,
@@ -136,6 +140,7 @@ type ButtonFeedback = {
 } | null;
 
 type FeedbackTimer = ReturnType<typeof globalThis.setTimeout>;
+type ActionFormValues = Record<string, unknown>;
 
 type FieldWidgetProps<TOptions = Record<string, unknown>> = {
   value: unknown;
@@ -217,6 +222,35 @@ const fieldHeaderStyle = {
   minWidth: 0,
 } satisfies CSSProperties;
 
+const inlineFormStyle = {
+  display: "grid",
+  gap: "0.5rem",
+  minWidth: 0,
+} satisfies CSSProperties;
+
+const inlineFieldStyle = {
+  display: "grid",
+  gap: "0.25rem",
+  minWidth: 0,
+} satisfies CSSProperties;
+
+const inlineInputStyle = {
+  border: "1px solid var(--border-color-kumo-base, #d1d5db)",
+  borderRadius: 6,
+  font: "inherit",
+  minHeight: 34,
+  minWidth: 0,
+  padding: "0.35rem 0.5rem",
+  width: "100%",
+} satisfies CSSProperties;
+
+const inlineCheckboxStyle = {
+  alignItems: "center",
+  display: "flex",
+  gap: "0.45rem",
+  minWidth: 0,
+} satisfies CSSProperties;
+
 function contextI18n(context: ActionButtonContext | undefined): ActionsI18nConfig | undefined {
   const config = context?.i18n;
   if (!config) return undefined;
@@ -287,6 +321,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
   const busyKeysRef = useRef<ReadonlySet<string>>(new Set());
   const [feedbackByKey, setFeedbackByKey] = useState<Record<string, ButtonFeedback>>({});
+  const [formValuesByKey, setFormValuesByKey] = useState<Record<string, ActionFormValues>>({});
   const feedbackTimers = useRef<Record<string, FeedbackTimer>>({});
   const runAbortControllers = useRef<Record<string, AbortController>>({});
   const responseI18n = state.status === "ready" ? state.i18n : undefined;
@@ -373,8 +408,26 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
     return true;
   }
 
+  function setDashboardFormValue(action: UiAction, fieldName: string, value: unknown) {
+    setFormValuesByKey((current) => ({
+      ...current,
+      [action.key]: {
+        ...dashboardFormValues(action, current[action.key]),
+        [fieldName]: value,
+      },
+    }));
+  }
+
   async function runAction(action: UiAction) {
     const label = actionLabel(action, i18n);
+    const formValues = dashboardFormValues(action, formValuesByKey[action.key]);
+    const target = dashboardActionTarget(context);
+    const validationError = actionSubmitValidationError(action, target, formValues);
+    if (validationError) {
+      setActionFeedback(action, { phase: "error", tone: "error", message: validationError });
+      return;
+    }
+
     const confirmMessage = localizedString(action.confirm, i18n);
     if (confirmMessage && !confirmDestructiveAction(confirmMessage)) return;
 
@@ -402,6 +455,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
           dashboardActionTarget(actionContext),
           controller.signal,
           i18n,
+          actionFormPayload(action.form, formValues),
         ),
       );
       const finalResult = await waitForActionResult(
@@ -491,6 +545,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
           {state.actions.map((action) => {
             const feedback = feedbackByKey[action.key] ?? null;
             const isBusy = isActionBusy(busyKeys, action.key);
+            const formValues = dashboardFormValues(action, formValuesByKey[action.key]);
 
             return (
               <LayerCard key={action.key}>
@@ -509,6 +564,15 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
                         {localizedString(action.provider.label, i18n, action.provider.pluginId)}
                       </Badge>
                     </div>
+                    <ActionInlineForm
+                      action={action}
+                      disabled={isBusy}
+                      i18n={i18n}
+                      onChange={(fieldName, fieldValue) =>
+                        setDashboardFormValue(action, fieldName, fieldValue)
+                      }
+                      values={formValues}
+                    />
                     <Button
                       className={buttonClassName(feedback)}
                       disabled={isActionDisabled(busyKeys, action.key, action.disabled === true)}
@@ -520,7 +584,9 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
                       type="button"
                       variant={buttonVariant(feedback?.tone ?? action.tone, feedback)}
                     >
-                      {feedback?.message ?? actionLabel(action, i18n)}
+                      {feedback?.message ??
+                        localizedString(action.form?.submitLabel, i18n) ??
+                        actionLabel(action, i18n)}
                     </Button>
                   </div>
                 </LayerCard.Primary>
@@ -555,6 +621,134 @@ function WidgetShell({ children }: { children: ReactNode }) {
   return <div style={shellStyle}>{children}</div>;
 }
 
+function ActionInlineForm({
+  action,
+  disabled,
+  i18n,
+  onChange,
+  values,
+}: {
+  action: Pick<ActionManifestDescriptor, "form" | "payload"> | null;
+  disabled?: boolean;
+  i18n: ActionsI18nConfig;
+  onChange: (fieldName: string, value: unknown) => void;
+  values: ActionFormValues;
+}) {
+  const form = action?.form;
+  if (!form || form.mode !== "inline" || form.fields.length === 0) return null;
+
+  return (
+    <div style={inlineFormStyle}>
+      {form.fields.map((field) => (
+        <ActionInlineFormField
+          disabled={disabled}
+          field={field}
+          i18n={i18n}
+          key={field.name}
+          onChange={(value) => onChange(field.name, value)}
+          value={values[field.name]}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ActionInlineFormField({
+  disabled,
+  field,
+  i18n,
+  onChange,
+  value,
+}: {
+  disabled?: boolean;
+  field: ActionFormField;
+  i18n: ActionsI18nConfig;
+  onChange: (value: unknown) => void;
+  value: unknown;
+}) {
+  const label = localizedString(field.label, i18n, field.name);
+  const description = localizedString(field.description, i18n);
+  const type = field.type ?? "string";
+
+  if (type === "boolean") {
+    return (
+      <label style={inlineCheckboxStyle}>
+        <input
+          checked={value === true}
+          disabled={disabled}
+          onChange={(event) => onChange(event.currentTarget.checked)}
+          type="checkbox"
+        />
+        <span>
+          <Text size="xs">{label}</Text>
+          {description ? (
+            <Text size="xs" variant="secondary">
+              {description}
+            </Text>
+          ) : null}
+        </span>
+      </label>
+    );
+  }
+
+  return (
+    <label style={inlineFieldStyle}>
+      <Text size="xs">{label}</Text>
+      {type === "select" ? (
+        <select
+          disabled={disabled}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          style={inlineInputStyle}
+          value={stringFormValue(value)}
+        >
+          <option value="" />
+          {(field.options ?? []).map((option) => (
+            <option key={String(formOptionValue(option))} value={String(formOptionValue(option))}>
+              {localizedString(formOptionLabel(option), i18n, String(formOptionValue(option)))}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          disabled={disabled}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          step={type === "integer" ? 1 : undefined}
+          style={inlineInputStyle}
+          type={inputTypeForFormField(type)}
+          value={stringFormValue(value)}
+        />
+      )}
+      {description ? (
+        <Text size="xs" variant="secondary">
+          {description}
+        </Text>
+      ) : null}
+    </label>
+  );
+}
+
+function dashboardFormValues(action: UiAction, values: ActionFormValues | undefined) {
+  return values ?? actionFormInitialValues(action.form, action.payload);
+}
+
+function stringFormValue(value: unknown) {
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function formOptionValue(option: NonNullable<ActionFormField["options"]>[number]) {
+  return typeof option === "object" && option !== null ? option.value : option;
+}
+
+function formOptionLabel(option: NonNullable<ActionFormField["options"]>[number]) {
+  return typeof option === "object" && option !== null ? option.label : undefined;
+}
+
+function inputTypeForFormField(type: ActionFormField["type"]) {
+  if (type === "number" || type === "integer") return "number";
+  if (type === "datetime") return "datetime-local";
+  return "text";
+}
+
 export function ActionButtonField(props: FieldWidgetProps<ActionButtonFieldOptions>) {
   return (
     <ActionRuntimeShell>
@@ -578,6 +772,7 @@ function ActionButtonFieldContent({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<ButtonFeedback>(null);
+  const [formValues, setFormValues] = useState<ActionFormValues>({});
   const feedbackTimer = useRef<FeedbackTimer | null>(null);
   const runAbortController = useRef<AbortController | null>(null);
   const i18n = useActionI18n(mergeI18n(contextI18n(context), options?.i18n));
@@ -609,6 +804,7 @@ function ActionButtonFieldContent({
         );
         if (!active) return;
         setAction(resolved);
+        setFormValues(actionFormInitialValues(resolved.form, resolved.payload));
         setError(null);
       } catch (loadError) {
         if (!active || isAbortError(loadError)) return;
@@ -674,6 +870,13 @@ function ActionButtonFieldContent({
     }
 
     if (!action) return;
+    const target = fieldActionTarget(context, { id, label, required, value });
+    const validationError = actionSubmitValidationError(action, target, formValues);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
     const actionDisplayLabel = actionLabel(action, i18n);
     const confirmMessage = localizedString(action.confirm, i18n);
     if (confirmMessage && !confirmDestructiveAction(confirmMessage)) return;
@@ -701,6 +904,7 @@ function ActionButtonFieldContent({
           fieldActionTarget(actionContext, { id, label, required, value }),
           controller.signal,
           i18n,
+          actionFormPayload(action.form, formValues),
         ),
       );
       const finalResult = await waitForActionResult(
@@ -822,6 +1026,16 @@ function ActionButtonFieldContent({
 
       {error ? <Banner title={error} variant="error" /> : null}
 
+      <ActionInlineForm
+        action={action}
+        disabled={busy}
+        i18n={i18n}
+        onChange={(fieldName, fieldValue) =>
+          setFormValues((current) => ({ ...current, [fieldName]: fieldValue }))
+        }
+        values={formValues}
+      />
+
       <Button
         className={buttonClassName(feedback)}
         disabled={disabled || action?.disabled === true}
@@ -836,7 +1050,7 @@ function ActionButtonFieldContent({
           feedback,
         )}
       >
-        {feedback?.message ?? buttonLabel}
+        {feedback?.message ?? localizedString(action?.form?.submitLabel, i18n) ?? buttonLabel}
       </Button>
     </div>
   );
@@ -1077,11 +1291,12 @@ async function callAction(
   target: ActionTarget | undefined,
   signal?: AbortSignal,
   i18n?: ActionsI18nConfig,
+  payload?: Record<string, unknown>,
 ) {
   const label = actionLabel(action, i18n ?? {});
   const response = await apiFetch(
     actionRequestRoute(action),
-    actionRequestInit(action, context, target, signal),
+    actionRequestInit(action, context, target, signal, payload),
   );
   return parseApiResponse<unknown>(
     response,

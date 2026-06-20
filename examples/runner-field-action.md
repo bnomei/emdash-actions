@@ -54,15 +54,19 @@ async function editorActionsManifestRoute(): Promise<ActionsManifest> {
     actions: [
       {
         id: "field.summarize",
-        mode: "runner",
+        runner: true,
         label: "Summarize",
         placement: "field",
         description: "Summarizes the current field value.",
         icon: "bolt",
         tone: "info",
         payload: { format: "short" },
-        target: "field",
-        input: {
+        target: {
+          surfaces: ["field"],
+          idFrom: "entryId",
+        },
+        form: {
+          mode: "inline",
           fields: [{ name: "format", type: "string", required: false }],
         },
         feedback: {
@@ -151,12 +155,14 @@ POST /_emdash/api/plugins/editor-actions/.well-known/actions/run
 
 ```json
 {
+  "invocationId": "inv_...",
   "actionId": "field.summarize",
   "payload": {
     "format": "short"
   },
   "target": {
     "type": "field",
+    "surface": "field",
     "collection": "posts",
     "entryId": "post-1",
     "locale": "en",

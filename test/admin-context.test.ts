@@ -85,12 +85,17 @@ describe("admin context and route helpers", () => {
       location: { href: "http://localhost/admin/content/posts/post-1?locale=de" },
     });
 
-    expect(dashboardActionTarget(undefined)).toEqual({ type: "dashboard" });
+    expect(dashboardActionTarget(undefined)).toEqual({
+      kind: "dashboard",
+      surface: "dashboard",
+      type: "dashboard",
+    });
     expect(fieldActionTarget(undefined, { id: "field-title", value: "Hello" })).toEqual({
       collection: "posts",
       entryId: "post-1",
       fieldName: "title",
       locale: "de",
+      surface: "field",
       type: "field",
       value: "Hello",
     });
@@ -104,7 +109,8 @@ describe("admin context and route helpers", () => {
         entryLocale: "en",
         fieldName: "blocks",
         row: { id: "row-1", text: "Hello" },
-        rowId: "row-1",
+        rowPath: "blocks.0",
+        rowValue: { text: "Draft" },
         surface: "row",
       }),
     ).toEqual({
@@ -112,9 +118,31 @@ describe("admin context and route helpers", () => {
       entryId: "post-1",
       fieldName: "blocks",
       locale: "en",
-      row: { id: "row-1", text: "Hello" },
+      path: "blocks.0",
       rowId: "row-1",
+      surface: "row",
       type: "row",
+      value: { text: "Draft" },
+    });
+
+    expect(
+      actionTargetFromContext({
+        collection: "posts",
+        entryId: "post-1",
+        fieldName: "blocks",
+        row: { id: "row-2", text: "Stored" },
+        rowPath: "blocks.1",
+        surface: "row",
+      }),
+    ).toEqual({
+      collection: "posts",
+      entryId: "post-1",
+      fieldName: "blocks",
+      path: "blocks.1",
+      rowId: "row-2",
+      surface: "row",
+      type: "row",
+      value: { id: "row-2", text: "Stored" },
     });
   });
 });

@@ -1,12 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   actionResultEffects,
   asDownloadEffect,
+  asReloadEffect,
   clipboardEffectText,
   mergeActionPatch,
   normalizeActionRunResult,
   runActionEffects,
   safeBrowserUrl,
+  scheduleReload,
 } from "../src/admin-effects";
 import type { ActionEffectTarget } from "../src/admin-effects";
 
@@ -16,6 +18,11 @@ const action: ActionEffectTarget = {
   route: "publish",
   targetPluginId: "source",
 };
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("admin action effects", () => {
   it("normalizes string results into configured result-effect presets", () => {
@@ -75,7 +82,7 @@ describe("admin action effects", () => {
       clipboard: { text: "entry-1" },
       download: { filename: "entry.json", route: "exports/entry" },
       open: { target: "self" as const, url: "/admin/content/posts/entry-1" },
-      reload: { delayMs: 25 },
+      reload: { delayMs: 25, scope: "field" as const },
     };
 
     expect(actionResultEffects(result)).toEqual(result);
@@ -97,7 +104,7 @@ describe("admin action effects", () => {
       target: "self",
       url: "/admin/content/posts/entry-1",
     });
-    expect(scheduleReload).toHaveBeenCalledWith(action, 25);
+    expect(scheduleReload).toHaveBeenCalledWith(action, { delayMs: 25, scope: "field" });
   });
 
   it("validates clipboard, download, and browser URL effects", () => {
@@ -109,8 +116,47 @@ describe("admin action effects", () => {
       url: undefined,
     });
     expect(() => asDownloadEffect({})).toThrow(/requires a URL or route/);
+    expect(asReloadEffect({ delayMs: 10, scope: "entry" })).toEqual({
+      delayMs: 10,
+      scope: "entry",
+    });
+    expect(() => asReloadEffect({ scope: "site" } as never)).toThrow(/Unsupported reload scope/);
 
     expect(safeBrowserUrl("/admin").href).toBe("http://localhost/admin");
     expect(() => safeBrowserUrl("javascript:alert(1)")).toThrow(/must use http/);
+  });
+
+  it("dispatches scoped reload events and falls back to page reload when unhandled", async () => {
+    vi.useFakeTimers();
+    const dispatchEvent = vi.fn(() => true);
+    const reload = vi.fn();
+    vi.stubGlobal("dispatchEvent", dispatchEvent);
+    vi.stubGlobal("location", { reload });
+
+    scheduleReload(action, { delayMs: 0, scope: "field" });
+    await vi.runAllTimersAsync();
+
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    expect(dispatchEvent.mock.calls[0]?.[0]).toMatchObject({
+      detail: {
+        scope: "field",
+      },
+      type: "emdash-actions:reload",
+    });
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not force page reload when a scoped reload event is handled", async () => {
+    vi.useFakeTimers();
+    const dispatchEvent = vi.fn(() => false);
+    const reload = vi.fn();
+    vi.stubGlobal("dispatchEvent", dispatchEvent);
+    vi.stubGlobal("location", { reload });
+
+    scheduleReload(action, { delayMs: 0, scope: "entry" });
+    await vi.runAllTimersAsync();
+
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    expect(reload).not.toHaveBeenCalled();
   });
 });

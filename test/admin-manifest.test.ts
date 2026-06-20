@@ -124,11 +124,16 @@ describe("admin manifest parsing", () => {
           {
             id: "field.summarize",
             label: "Summarize",
-            mode: "runner",
+            runner: { route: "actions/run-field" },
             placement: "field",
             payload: { model: "small" },
-            target: ["field", "entry"],
-            input: {
+            target: {
+              surfaces: ["field", "entry"],
+              idFrom: "entryId",
+              required: true,
+            },
+            form: {
+              mode: "inline",
               fields: [
                 {
                   name: "instructions",
@@ -148,7 +153,7 @@ describe("admin manifest parsing", () => {
     expect(manifest.actions[0]).toEqual(
       expect.objectContaining({
         id: "field.summarize",
-        input: {
+        form: {
           fields: [
             {
               default: "Keep it short",
@@ -158,12 +163,17 @@ describe("admin manifest parsing", () => {
               type: "string",
             },
           ],
+          mode: "inline",
         },
         label: "Summarize",
-        mode: "runner",
         payload: { model: "small" },
         placement: "field",
-        target: ["field", "entry"],
+        runner: { route: "actions/run-field" },
+        target: {
+          idFrom: "entryId",
+          required: true,
+          surfaces: ["field", "entry"],
+        },
       }),
     );
     expect("route" in manifest.actions[0]!).toBe(false);
@@ -177,7 +187,7 @@ describe("admin manifest parsing", () => {
             {
               id: "unsafe",
               label: "Unsafe",
-              mode: "runner",
+              runner: true,
               route: "business/delete",
             },
           ],
@@ -193,7 +203,7 @@ describe("admin manifest parsing", () => {
             {
               id: "unsafe",
               label: "Unsafe",
-              mode: "runner",
+              runner: true,
               pluginId: "target",
             },
           ],
@@ -201,6 +211,80 @@ describe("admin manifest parsing", () => {
         provider,
       ),
     ).toThrow(/must not define pluginId/);
+  });
+
+  it("rejects invalid runner, target, and form metadata", () => {
+    expect(() =>
+      parseActionsManifest(
+        {
+          actions: [{ id: "bad", label: "Bad", runner: false }],
+        },
+        provider,
+      ),
+    ).toThrow(/runner must be true or an object/);
+
+    expect(() =>
+      parseActionsManifest(
+        {
+          actions: [
+            {
+              id: "bad",
+              label: "Bad",
+              runner: true,
+              target: { surfaces: ["spaceship"] },
+            },
+          ],
+        },
+        provider,
+      ),
+    ).toThrow(/Unsupported action target/);
+
+    expect(() =>
+      parseActionsManifest(
+        {
+          actions: [
+            {
+              id: "bad",
+              label: "Bad",
+              runner: true,
+              form: {
+                mode: "inline",
+                fields: [{ name: "1-invalid", type: "select" }],
+              },
+            },
+          ],
+        },
+        provider,
+      ),
+    ).toThrow(/name is invalid/);
+  });
+
+  it("keeps legacy input metadata permissive", () => {
+    const manifest = parseActionsManifest(
+      {
+        actions: [
+          {
+            id: "legacy.input",
+            label: "Legacy input",
+            runner: true,
+            input: {},
+          },
+          {
+            id: "legacy.json",
+            label: "Legacy json",
+            runner: true,
+            input: {
+              fields: [{ name: "config", type: "json" }],
+            },
+          },
+        ],
+      },
+      provider,
+    );
+
+    expect(manifest.actions[0]?.input).toEqual({});
+    expect(manifest.actions[0]?.form).toBeUndefined();
+    expect(manifest.actions[1]?.input).toEqual({ fields: [{ name: "config", type: "json" }] });
   });
 
   it("rejects duplicate action ids and disallowed target plugin ids", () => {
