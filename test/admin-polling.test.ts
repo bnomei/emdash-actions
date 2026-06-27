@@ -80,6 +80,35 @@ describe("admin action polling", () => {
     expect(pollActionStatus).toHaveBeenCalledTimes(1);
   });
 
+  it("clamps the poll sleep to the remaining timeout budget", async () => {
+    let now = 1000;
+    const sleep = vi.fn(async (ms: number) => {
+      now += ms;
+    });
+    const pollActionStatus = vi.fn(async () => ({
+      ok: true,
+      status: 202,
+      statusRoute: "jobs/1",
+    }));
+
+    await expect(
+      waitForActionResult(
+        { ...action, pollIntervalMs: 1500, pollTimeoutMs: 250 },
+        { ok: true, status: 202, statusRoute: "jobs/1" },
+        () => undefined,
+        pollActionStatus,
+        undefined,
+        { now: () => now, sleep },
+      ),
+    ).rejects.toThrow(/still running/);
+
+    // The first sleep is clamped to the 250ms budget rather than the 1500ms
+    // poll interval, so the timeout fires after ~250ms, not ~1500ms.
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep).toHaveBeenCalledWith(250, undefined);
+    expect(pollActionStatus).toHaveBeenCalledTimes(1);
+  });
+
   it("classifies pending, failed, and successful terminal polling states", () => {
     expect(shouldContinuePolling({ ok: true, status: 202 })).toBe(true);
     expect(shouldContinuePolling({ jobStatus: "running", ok: true, status: 200 })).toBe(true);

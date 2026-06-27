@@ -45,13 +45,17 @@ export async function waitForActionResult<TAction extends ActionManifestDescript
   while (statusRoute && (pollAtLeastOnce || shouldContinuePolling(result))) {
     throwIfAborted(signal);
     onProgress(result);
-    if (now() - startedAt > timeoutMs) {
+    const elapsed = now() - startedAt;
+    if (elapsed >= timeoutMs) {
       throw new Error(
         `${localizedString(action.label, undefined, action.id)} is still running. Check the provider job status.`,
       );
     }
 
-    await sleep(pollDelayMs(action, result), signal);
+    // Clamp the poll delay to the remaining timeout budget so a short
+    // pollTimeoutMs is not overrun by a whole poll interval before the
+    // timeout is enforced on the next iteration.
+    await sleep(Math.min(pollDelayMs(action, result), timeoutMs - elapsed), signal);
     result = await pollActionStatus(action, statusRoute, signal);
     statusRoute = readStatusRoute(result) ?? statusRoute;
     pollAtLeastOnce = false;

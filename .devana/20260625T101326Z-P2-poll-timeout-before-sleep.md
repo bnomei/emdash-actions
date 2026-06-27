@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P2 | Confidence: high | Security-sensitive: no | Status: open
+Priority: P2 | Confidence: high | Security-sensitive: no | Status: fixed
 Location: src/admin-polling.ts:45 | Slug: poll-timeout-before-sleep
 
 # `pollTimeoutMs` can be exceeded by a full poll delay before timeout is enforced
@@ -51,6 +51,7 @@ After working this report, preserve the original finding body. Update line 2 `St
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed the loop slept the full `pollDelayMs` (>=250ms, default 1500ms) before re-checking the timeout, overrunning a short `pollTimeoutMs` by up to a whole interval. Now clamp the sleep to `timeoutMs - elapsed`. Changed the timeout comparison from `>` to `>=` because clamping alone with strict `>` busy-loops at the deadline (remaining budget 0 → sleep 0 → re-poll). Verified both existing tests still hold: the accepted-at-least-once test still sleeps the full 1500ms (budget 120000), and the timeout test still polls exactly once. Added a regression test asserting the first sleep is clamped to 250ms (not 1500ms) and the timeout fires after one poll. Typecheck + polling tests pass.
 
 DEVANA-KEY: src/admin-polling.ts:45 | P2 | poll-timeout-before-sleep
-DEVANA-SUMMARY: Status=open | P2 high src/admin-polling.ts:45 - Poll timeout is checked before sleeping, so a 250ms timeout can wait a full 1500ms poll delay before firing.
+DEVANA-SUMMARY: Status=fixed | P2 high src/admin-polling.ts:45 - Poll sleep is clamped to the remaining timeout budget, so a short pollTimeoutMs is enforced within its budget instead of after a full poll interval.
