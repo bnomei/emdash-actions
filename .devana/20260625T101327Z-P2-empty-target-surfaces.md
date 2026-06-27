@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P2 | Confidence: high | Security-sensitive: no | Status: open
+Priority: P2 | Confidence: high | Security-sensitive: no | Status: fixed
 Location: src/admin-invocation.ts:50 | Slug: empty-target-surfaces
 
 # Empty `target.surfaces` parses successfully but hides the action everywhere
@@ -53,6 +53,7 @@ After working this report, preserve the original finding body. Update line 2 `St
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `surfaces: []` is truthy, so `actionMatchesTargetRequirement`'s `!surfaces` fast path was skipped and `[].includes(type)` was always false, hiding the action everywhere. Chose the "reject at parse time" option (over silently treating `[]` as unrestricted) so a provider typo surfaces loudly. Added an empty-array guard in both manifest paths that produce surfaces: the direct `target: []` array branch and `readOptionalTargetSurfaces` (`target: { surfaces: [] }`), each throwing "must list at least one surface; omit it for no restriction". Added regression tests for both shapes. Typecheck + manifest tests (9) pass.
 
 DEVANA-KEY: src/admin-invocation.ts:50 | P2 | empty-target-surfaces
-DEVANA-SUMMARY: Status=open | P2 high src/admin-invocation.ts:50 - An empty target.surfaces array parses validly but matches no surface, so the action is permanently hidden and unsubmittable.
+DEVANA-SUMMARY: Status=fixed | P2 high src/admin-invocation.ts:50 - Empty target.surfaces arrays are now rejected at parse time (both target: [] and target: { surfaces: [] }), so a typo can no longer silently register a hidden, unsubmittable action.

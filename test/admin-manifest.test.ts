@@ -242,6 +242,24 @@ describe("admin manifest parsing", () => {
     expect(() =>
       parseActionsManifest(
         {
+          actions: [{ id: "bad", label: "Bad", runner: true, target: { surfaces: [] } }],
+        },
+        provider,
+      ),
+    ).toThrow(/must list at least one surface/);
+
+    expect(() =>
+      parseActionsManifest(
+        {
+          actions: [{ id: "bad", label: "Bad", runner: true, target: [] }],
+        },
+        provider,
+      ),
+    ).toThrow(/must list at least one surface/);
+
+    expect(() =>
+      parseActionsManifest(
+        {
           actions: [
             {
               id: "bad",

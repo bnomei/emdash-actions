@@ -282,6 +282,9 @@ function readOptionalTargetMetadata(
   if (value === undefined || value === null) return undefined;
   if (typeof value === "string") return { surfaces: [readTargetType(value, field)] };
   if (Array.isArray(value)) {
+    if (value.length === 0) {
+      throw new Error(`Action ${field} must list at least one surface; omit it for no restriction`);
+    }
     return {
       surfaces: [...new Set(value.map((item, index) => readTargetType(item, `${field}.${index}`)))],
     };
@@ -311,6 +314,9 @@ function readOptionalTargetSurfaces(
 ): readonly ActionTargetType[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) throw new Error(`Action ${field} must be an array`);
+  if (value.length === 0) {
+    throw new Error(`Action ${field} must list at least one surface; omit it for no restriction`);
+  }
   return [...new Set(value.map((item, index) => readTargetType(item, `${field}.${index}`)))];
 }
 
