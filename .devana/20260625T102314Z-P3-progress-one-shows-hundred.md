@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P3 | Confidence: medium | Security-sensitive: no | Status: open
+Priority: P3 | Confidence: medium | Security-sensitive: no | Status: invalid
 Location: src/admin.tsx:1698 | Slug: progress-one-shows-hundred
 
 # progressLabel renders progress value 1 as "100%"
@@ -60,6 +60,7 @@ explicit unit so `1` is not ambiguous.
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: invalid. The report assumed an integer-percentage convention, but the project's documented oracle (`examples/async-job.md:91-106`) emits `progress: 1` alongside `jobStatus: "succeeded"` and "Export complete" — i.e. `1` means 100% complete under a fraction (0..1) convention. So `value <= 1 → value * 100` rendering `1` as "100%" is correct, and the `value > 1` branch is only a lenient fallback for providers that send integer percentages. The suggested fix (`value < 1`) would regress the documented example, rendering a finished export as "1%". No behavior change made; added a code comment documenting the fraction convention (the report's "document it" suggestion). Typecheck passes.
 
 DEVANA-KEY: src/admin.tsx:1698 | P3 | progress-one-shows-hundred
-DEVANA-SUMMARY: Status=open | P3 medium src/admin.tsx:1698 - progressLabel treats value<=1 as a fraction, so an integer-percentage progress of 1 (1%) is rendered as "100%" during polling.
+DEVANA-SUMMARY: Status=invalid | P3 medium src/admin.tsx:1698 - Per the documented fraction (0..1) convention (examples/async-job.md uses progress:1 for a completed job), rendering 1 as "100%" is correct; the integer-percentage premise does not hold. Documented the convention in a comment; no behavior change.

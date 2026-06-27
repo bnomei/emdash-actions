@@ -1726,6 +1726,9 @@ function jobStatusLabel(status: ActionJobStatus | string, i18n: ActionsI18nConfi
 function progressLabel(progress: unknown) {
   const value = numberOrNull(progress);
   if (value === null) return null;
+  // Progress convention is a fraction 0..1, where 1 means 100% complete (see
+  // examples/async-job.md, which reports `progress: 1` for a finished job).
+  // Values > 1 are leniently treated as already-formed integer percentages.
   const normalized = value <= 1 ? value * 100 : value;
   return `${Math.max(0, Math.min(100, Math.round(normalized)))}%`;
 }
