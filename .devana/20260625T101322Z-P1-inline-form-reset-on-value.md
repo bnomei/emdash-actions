@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P1 | Confidence: high | Security-sensitive: no | Status: open
+Priority: P1 | Confidence: high | Security-sensitive: no | Status: fixed
 Location: src/admin.tsx:845 | Slug: inline-form-reset-on-value
 
 # Inline form input is discarded when the host field value changes
@@ -49,6 +49,7 @@ After working this report, preserve the original finding body. Update line 2 `St
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed the load effect listed `value` in its deps and unconditionally re-ran `setFormValues(actionFormInitialValues(...))`, wiping inline form input on each host-field keystroke. Removed `value` from the dep array; `targetType` (the only `value`-derived dep) is `.type`, which does not vary with `value`, so the descriptor still reloads on identity changes. The live field value is re-merged into the payload at submit time (see valuekey-stale-payload), so dropping it from the reload deps loses no correctness. Typecheck + full suite (38 tests) pass.
 
 DEVANA-KEY: src/admin.tsx:845 | P1 | inline-form-reset-on-value
-DEVANA-SUMMARY: Status=open | P1 high src/admin.tsx:845 - Inline form state resets on every host field value change because the load effect reinitializes form values unconditionally.
+DEVANA-SUMMARY: Status=fixed | P1 high src/admin.tsx:845 - Load effect no longer depends on `value`, so inline form input persists across host-field edits; the live value is re-merged at submit time instead.

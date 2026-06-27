@@ -857,7 +857,11 @@ function ActionButtonFieldContent({
       active = false;
       controller.abort();
     };
-  }, [label, options, targetType, value]);
+    // `value` is intentionally excluded: re-resolving on every host-field
+    // keystroke would reset inline `setFormValues` and discard user input.
+    // The live `value` is re-merged into the payload at submit time in
+    // `runFieldAction`, so the resolved descriptor does not need to track it.
+  }, [label, options, targetType]);
 
   useEffect(() => {
     return () => {
