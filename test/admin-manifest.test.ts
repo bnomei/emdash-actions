@@ -275,6 +275,70 @@ describe("admin manifest parsing", () => {
         provider,
       ),
     ).toThrow(/name is invalid/);
+
+    expect(() =>
+      parseActionsManifest(
+        {
+          actions: [
+            {
+              id: "bad",
+              label: "Bad",
+              runner: true,
+              form: {
+                mode: "inline",
+                fields: [
+                  { name: "scope", type: "select", options: ["a"], default: "b" },
+                ],
+              },
+            },
+          ],
+        },
+        provider,
+      ),
+    ).toThrow(/default is not valid/);
+
+    expect(() =>
+      parseActionsManifest(
+        {
+          actions: [
+            {
+              id: "bad",
+              label: "Bad",
+              runner: true,
+              form: {
+                mode: "inline",
+                fields: [{ name: "flag", type: "boolean", default: "true" }],
+              },
+            },
+          ],
+        },
+        provider,
+      ),
+    ).toThrow(/default is not valid/);
+  });
+
+  it("accepts a valid form field default", () => {
+    const manifest = parseActionsManifest(
+      {
+        actions: [
+          {
+            id: "ok",
+            label: "OK",
+            runner: true,
+            form: {
+              mode: "inline",
+              fields: [
+                { name: "scope", type: "select", options: ["a", "b"], default: "b" },
+                { name: "flag", type: "boolean", default: true },
+              ],
+            },
+          },
+        ],
+      },
+      provider,
+    );
+
+    expect(manifest.actions[0]?.form?.fields).toHaveLength(2);
   });
 
   it("keeps legacy input metadata permissive", () => {

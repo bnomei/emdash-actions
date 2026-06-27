@@ -424,9 +424,47 @@ function readFormFields(value: unknown, field: string): readonly ActionFormField
     if ((input.type ?? "string") === "select" && (!input.options || input.options.length === 0)) {
       throw new Error(`Action ${field}.${index}.options is required for select fields`);
     }
+    // Reject a default the submit validator would reject (wrong type, or a
+    // select value outside `options`), otherwise the unedited form is silently
+    // unsubmittable. Missing defaults are skipped — the submit path skips them
+    // too. Same rules as `isValidFormFieldValue`, the consumer's check.
+    if (
+      Object.hasOwn(input, "default") &&
+      !isMissingFormFieldValue(input.default) &&
+      !isValidFormFieldValue(input, input.default)
+    ) {
+      throw new Error(`Action ${field}.${index}.default is not valid for this field`);
+    }
 
     return input;
   });
+}
+
+export function formOptionValue(option: NonNullable<ActionFormField["options"]>[number]) {
+  return typeof option === "object" && option !== null ? option.value : option;
+}
+
+export function isMissingFormFieldValue(value: unknown) {
+  if (value === undefined || value === null) return true;
+  return typeof value === "string" && !value.trim();
+}
+
+// Shared with the submit-time gate so the parser and consumer cannot disagree
+// about which form values are valid (see form-default-unvalidated-blocks-submit).
+export function isValidFormFieldValue(field: ActionFormField, value: unknown) {
+  const type = field.type ?? "string";
+  if (type === "number") return Number.isFinite(typeof value === "number" ? value : Number(value));
+  if (type === "integer") {
+    const number = typeof value === "number" ? value : Number(value);
+    return Number.isInteger(number);
+  }
+  if (type === "boolean") return typeof value === "boolean";
+  if (type === "select" && field.options) {
+    return field.options.some(
+      (option) => formOptionValue(option) === value || String(formOptionValue(option)) === value,
+    );
+  }
+  return true;
 }
 
 function readOptionalFormOptions(

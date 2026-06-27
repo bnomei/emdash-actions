@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | high | security=no
+DEVANA-STATE: fixed | P2 | high | security=no
 DEVANA-KEY: src/admin-manifest.ts:417 | form-default-unvalidated-blocks-submit
 
 # Form-field default is accepted by the parser but rejected by the submit validator
@@ -88,6 +88,7 @@ Preserve the original finding body. Update line 2 `DEVANA-STATE:` and the final
 
 - 2026-06-27: open by Devana. Verified parser at admin-manifest.ts:388-423 and
   consumer at admin-invocation.ts:123-168,228-242, submit gate admin.tsx:458/912.
+- 2026-06-27: fixed. Confirmed `readFormFields` stored `default` verbatim while the submit gate's `isValidFormFieldValue` enforces type/options, so a mistyped or out-of-options default made the unedited form unsubmittable. Root cause is a parser/consumer mismatch, so fixed it by sharing the validator rather than duplicating: moved `isValidFormFieldValue` and its `optionValue` helper (now `formOptionValue`) into admin-manifest.ts (exported; admin-invocation already imports from admin-manifest, so no cycle) and had admin-invocation import them. `readFormFields` now rejects a non-missing default that fails `isValidFormFieldValue` at parse time (added `isMissingFormFieldValue` so missing defaults are skipped, matching the submit path which skips them). `coerceFormFieldValue` updated to use `formOptionValue`. Added tests: select default outside options and string `"true"` boolean default both throw at parse; a valid select/boolean default parses. Typecheck + full suite (55 tests) pass.
 
 DEVANA-KEY: src/admin-manifest.ts:417 | form-default-unvalidated-blocks-submit
-DEVANA-SUMMARY: open | P2 | high | A form field default that is out-of-options or type-mismatched is accepted by the parser but rejected by the submit validator, so the unedited form (even with the field optional) cannot be submitted.
+DEVANA-SUMMARY: fixed | P2 | high | The form-field validator is now shared between parser and submit gate; readFormFields rejects a type-mismatched or out-of-options default at manifest load (missing defaults skipped), so a bad default surfaces loudly instead of silently blocking the unedited form.
