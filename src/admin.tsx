@@ -934,15 +934,22 @@ function ActionButtonFieldContent({
         controller.signal,
       );
       throwIfAborted(controller.signal);
+      // Re-merge the live field value so a stale `valueKey` payload (resolved
+      // before the user edited the field) cannot be submitted while the
+      // descriptor reload is still in flight.
+      const liveAction: UiAction = {
+        ...action,
+        payload: mergeFieldPayload(action.payload, options, value),
+      };
       const result = normalizeActionRunResult(
-        action,
+        liveAction,
         await callAction(
-          action,
+          liveAction,
           actionContext,
           fieldActionTarget(actionContext, { id, label, required, value }),
           controller.signal,
           i18n,
-          actionFormPayload(action.form, formValues),
+          actionFormPayload(liveAction.form, formValues),
         ),
       );
       const finalResult = await waitForActionResult(
