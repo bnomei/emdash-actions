@@ -874,6 +874,17 @@ function ActionButtonFieldContent({
     };
   }, []);
 
+  // Abort any in-flight run when the bound field value, options, label, or
+  // target change. This supersedes the run so its completion handler bails
+  // (via `throwIfAborted`) instead of writing stale results back into the
+  // now-changed field. It deliberately does not touch `formValues`, so inline
+  // form input is preserved across host-field edits.
+  useEffect(() => {
+    return () => {
+      runAbortController.current?.abort();
+    };
+  }, [label, options, targetType, value]);
+
   function clearFieldFeedback() {
     if (feedbackTimer.current) {
       globalThis.clearTimeout(feedbackTimer.current);
@@ -966,6 +977,11 @@ function ActionButtonFieldContent({
           pollActionStatus(nextAction, statusRoute, signal, i18n),
         controller.signal,
       );
+      // Bail before committing any state if the field value, options, or
+      // resolved action changed while this run was in flight; otherwise a
+      // stale completion could patch the descriptor, write the result back
+      // through `onChange`, or run effects against superseded context.
+      throwIfAborted(controller.signal);
       showActionToasts(finalResult, i18n);
       if (isSuccessfulTerminalResult(finalResult)) {
         const patchedAction = mergeActionResultPatch(action, finalResult);

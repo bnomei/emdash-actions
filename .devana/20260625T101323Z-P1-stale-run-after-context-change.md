@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P1 | Confidence: high | Security-sensitive: no | Status: open
+Priority: P1 | Confidence: high | Security-sensitive: no | Status: fixed
 Location: src/admin.tsx:959 | Slug: stale-run-after-context-change
 
 # In-flight field runs can commit results after context or value changes
@@ -49,6 +49,7 @@ After working this report, preserve the original finding body. Update line 2 `St
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed the load effect aborted only the manifest-load controller and the completion path had no generation/abort guard. Added (1) a dedicated effect with deps `[label, options, targetType, value]` whose cleanup aborts `runAbortController` on any context change — it intentionally does not touch `formValues`, so the inline-form-reset-on-value fix is preserved — and (2) a `throwIfAborted(controller.signal)` immediately after `waitForActionResult` returns, before `showActionToasts`/`setAction`/`runActionEffects`/`applyFieldResultValue`. A superseded run now throws an abort (swallowed by the existing `isAbortError` branch) instead of committing stale state. Note: `value` is in the abort effect's deps but not the load effect's, so value changes cancel runs without re-resolving the descriptor. Typecheck + suite (38 tests) pass.
 
 DEVANA-KEY: src/admin.tsx:959 | P1 | stale-run-after-context-change
-DEVANA-SUMMARY: Status=open | P1 high src/admin.tsx:959 - Field action runs are not cancelled or generation-guarded when value/options change, so stale completions can patch state and write results into the wrong field.
+DEVANA-SUMMARY: Status=fixed | P1 high src/admin.tsx:959 - In-flight runs are aborted on value/options/label/target change and the completion path bails via throwIfAborted, so stale runs can no longer patch state or write results into the wrong field.
