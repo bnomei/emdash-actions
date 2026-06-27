@@ -39,11 +39,14 @@ export type ReloadEffect = {
   delayMs?: number;
 };
 
+type ActionEffectName = "clipboard" | "download" | "open" | "reload";
+
 type ActionEffectDependencies = {
   writeClipboardText?: (text: string) => Promise<void>;
   runDownloadEffect?: (action: ActionEffectTarget, effect: DownloadEffect) => Promise<void>;
   runOpenEffect?: (effect: { url: string; target: ActionResultOpenTarget }) => void;
   scheduleReload?: (action: ActionManifestDescriptor, effect: ReloadEffect) => void;
+  onEffectError?: (name: ActionEffectName, error: unknown) => void;
 };
 
 export function normalizeActionRunResult(
@@ -227,19 +230,40 @@ export async function runActionEffects(
   const runDownload = dependencies.runDownloadEffect ?? runDownloadEffect;
   const runOpen = dependencies.runOpenEffect ?? runOpenEffect;
   const reload = dependencies.scheduleReload ?? scheduleReload;
+  const onEffectError = dependencies.onEffectError ?? noopEffectError;
 
-  const clipboard = clipboardEffectText(effects.clipboard);
-  if (clipboard !== null) await writeClipboard(clipboard);
+  // Effects are independent, best-effort side effects. Isolate each (parse +
+  // execution) so a failing one — e.g. clipboard denied on plain HTTP, or a
+  // malformed download shape — neither skips the remaining effects (a
+  // requested reload still runs) nor reclassifies a server-successful action
+  // as a failure in the run caller's catch.
+  async function runEffect(name: ActionEffectName, run: () => void | Promise<void>) {
+    try {
+      await run();
+    } catch (error) {
+      onEffectError(name, error);
+    }
+  }
 
-  const download = asDownloadEffect(effects.download);
-  if (download) await runDownload(action, download);
-
-  const open = asOpenEffect(effects.open);
-  if (open) runOpen(open);
-
-  const reloadEffect = asReloadEffect(effects.reload);
-  if (reloadEffect) reload(action, reloadEffect);
+  await runEffect("clipboard", async () => {
+    const clipboard = clipboardEffectText(effects.clipboard);
+    if (clipboard !== null) await writeClipboard(clipboard);
+  });
+  await runEffect("download", async () => {
+    const download = asDownloadEffect(effects.download);
+    if (download) await runDownload(action, download);
+  });
+  await runEffect("open", () => {
+    const open = asOpenEffect(effects.open);
+    if (open) runOpen(open);
+  });
+  await runEffect("reload", () => {
+    const reloadEffect = asReloadEffect(effects.reload);
+    if (reloadEffect) reload(action, reloadEffect);
+  });
 }
+
+const noopEffectError: (name: ActionEffectName, error: unknown) => void = () => {};
 
 export function actionResultEffects(result: ActionRunResult): ActionResultEffects | null {
   const effects = asRecord(result.effects) ? ({ ...result.effects } as ActionResultEffects) : {};

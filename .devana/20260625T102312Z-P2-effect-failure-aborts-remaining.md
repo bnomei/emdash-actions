@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P2 | Confidence: high | Security-sensitive: no | Status: open
+Priority: P2 | Confidence: high | Security-sensitive: no | Status: fixed
 Location: src/admin-effects.ts:197 | Slug: effect-failure-aborts-remaining
 
 # One failing effect aborts the remaining effects and flips success to failure
@@ -68,6 +68,7 @@ clipboard/open outcome so a clipboard-permission error cannot suppress a request
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `runActionEffects` ran clipboard→download→open→reload as bare awaited calls; the first throw skipped the rest and propagated to the run caller's catch, reclassifying success as failure. Wrapped each effect's parse + execution in an isolating `runEffect(name, run)` that catches and forwards to an optional `onEffectError(name, error)` dependency (default no-op), so every effect runs independently and the function never rejects on an individual effect failure. Note this also means `runOpenEffect`'s new same-origin throw (open-redirect fix) is now swallowed as a non-fatal effect error rather than aborting siblings — defense in depth, the off-origin nav simply doesn't happen. Added a regression test: a throwing clipboard still schedules the reload, resolves undefined, and reports via `onEffectError`. Typecheck + effects tests (9) pass.
 
 DEVANA-KEY: src/admin-effects.ts:197 | P2 | effect-failure-aborts-remaining
-DEVANA-SUMMARY: Status=open | P2 high src/admin-effects.ts:197 - runActionEffects runs effects sequentially with no isolation, so a clipboard/open failure skips the remaining effects (e.g. reload) and converts a successful action into a displayed error.
+DEVANA-SUMMARY: Status=fixed | P2 high src/admin-effects.ts:197 - Each result effect is now isolated, so one failing effect (clipboard/open/download) no longer skips the remaining effects (e.g. reload) nor reclassifies a successful action as a failure.

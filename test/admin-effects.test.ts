@@ -122,6 +122,28 @@ describe("admin action effects", () => {
     expect(scheduleReload).toHaveBeenCalledWith(action, { delayMs: 25, scope: "field" });
   });
 
+  it("isolates a failing effect so remaining effects still run", async () => {
+    const writeClipboardText = vi.fn(async () => {
+      throw new Error("Clipboard access requires HTTPS or localhost.");
+    });
+    const scheduleReload = vi.fn();
+    const onEffectError = vi.fn();
+
+    // A clipboard failure must not skip the requested reload, and must not
+    // reject (which would reclassify a successful action as a failure).
+    await expect(
+      runActionEffects(
+        action,
+        { clipboard: { text: "x" }, reload: true },
+        { writeClipboardText, scheduleReload, onEffectError },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(writeClipboardText).toHaveBeenCalledTimes(1);
+    expect(scheduleReload).toHaveBeenCalledTimes(1);
+    expect(onEffectError).toHaveBeenCalledWith("clipboard", expect.any(Error));
+  });
+
   it("validates clipboard, download, and browser URL effects", () => {
     expect(clipboardEffectText("copy me")).toBe("copy me");
     expect(() => clipboardEffectText({ text: 1 } as never)).toThrow(/requires text/);
