@@ -37,7 +37,12 @@ export async function waitForActionResult<TAction extends ActionManifestDescript
   let result = initialResult;
   let statusRoute = readStatusRoute(result);
 
-  if (!shouldStartPolling(action, result, statusRoute)) return result;
+  if (!shouldStartPolling(action, result, statusRoute)) {
+    // Guard the non-polling fast path too: an abort between callAction and here
+    // must not let a superseded/unmounted run commit terminal side effects.
+    throwIfAborted(signal);
+    return result;
+  }
 
   const timeoutMs = pollTimeoutMs(action);
   const startedAt = now();
@@ -62,6 +67,11 @@ export async function waitForActionResult<TAction extends ActionManifestDescript
     pollAtLeastOnce = false;
   }
 
+  // A terminal poll body can resolve after the run was aborted (superseded or
+  // unmounted). Re-check before returning so the caller does not commit
+  // success handling — patches, effects, field writeback, toasts — for a run
+  // that is no longer current.
+  throwIfAborted(signal);
   return result;
 }
 

@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P1 | high | security=no
+DEVANA-STATE: fixed | P1 | high | security=no
 DEVANA-KEY: src/admin-polling.ts:45 | poll-terminal-ignores-abort
 
 # Terminal poll result returned after abort still commits success handling
@@ -48,6 +48,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `waitForActionResult` checked the signal only at the top of each loop iteration and inside sleep/fetch, returning a terminal poll body (and the non-polling fast path) without a final abort check; the dashboard `runAction` had no post-`waitForActionResult` guard (its catch swallows AbortError). Applied the report's centralized fix: `throwIfAborted(signal)` before both returns — the early non-polling fast path and the post-loop terminal return — so a superseded/unmounted run rejects (AbortError, swallowed by both callers' catch) instead of committing patches/effects/writeback/toasts. This covers both the field and dashboard paths from one place (the field path's own post-call guard from stale-run-after-context-change is now defensive/redundant but harmless). Added tests: terminal poll after abort rejects with AbortError; fast path rejects when pre-aborted. Typecheck + polling tests (9) pass.
 
 DEVANA-KEY: src/admin-polling.ts:45 | poll-terminal-ignores-abort
-DEVANA-SUMMARY: open | P1 | high | waitForActionResult returns a terminal poll success without a final abort check, so superseded or unmounted runs can still apply patches, effects, and field writeback.
+DEVANA-SUMMARY: fixed | P1 | high | waitForActionResult now calls throwIfAborted before both returns (terminal poll + non-polling fast path), so superseded/unmounted runs reject instead of committing patches, effects, field writeback, and toasts.

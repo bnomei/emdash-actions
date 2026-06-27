@@ -110,6 +110,47 @@ describe("admin action polling", () => {
     expect(pollActionStatus).toHaveBeenCalledTimes(1);
   });
 
+  it("does not return a terminal poll result after the run was aborted", async () => {
+    const controller = new AbortController();
+    let now = 0;
+    const sleep = vi.fn(async (ms: number) => {
+      now += ms;
+    });
+    // The status poll resolves with a terminal body, but the run is aborted
+    // (superseded/unmounted) before it returns; waitForActionResult must reject
+    // so the caller does not commit success handling for a stale run.
+    const pollActionStatus = vi.fn(async () => {
+      controller.abort();
+      return { jobStatus: "succeeded" as const, ok: true, status: 200 };
+    });
+
+    await expect(
+      waitForActionResult(
+        action,
+        { ok: true, status: 202, statusRoute: "jobs/1" },
+        () => undefined,
+        pollActionStatus,
+        controller.signal,
+        { now: () => now, sleep },
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("rejects on the non-polling fast path when already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      waitForActionResult(
+        action,
+        { ok: true, status: 200 },
+        () => undefined,
+        vi.fn(),
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("classifies pending, failed, and successful terminal polling states", () => {
     expect(shouldContinuePolling({ ok: true, status: 202 })).toBe(true);
     expect(shouldContinuePolling({ jobStatus: "running", ok: true, status: 200 })).toBe(true);
