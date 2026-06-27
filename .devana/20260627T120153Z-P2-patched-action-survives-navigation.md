@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | high | security=no
+DEVANA-STATE: fixed | P2 | high | security=no
 DEVANA-KEY: src/admin.tsx:819 | patched-action-survives-navigation
 
 # Result-patched field action descriptor survives entry navigation
@@ -47,6 +47,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed the load effect deps lacked entry identity, so a result-patched descriptor (label/confirm/tone/disabled/payload) persisted across client navigation to a different entry. (Note: this was latent but surfaced/worsened by inline-form-reset-on-value, which removed `value` from those deps.) Added a derived `entryKey` = collection + entryId + entryLocale (from `context` or `readEntryContextRoute()`) and included it in the load-effect deps, so navigating to a different entry reloads the manifest and replaces the patched descriptor with the new entry's defaults, while in-entry value edits (same entryKey) still don't reload — preserving the inline-form fix. Also added `entryKey` to the run-abort effect so an in-flight run on the prior entry is superseded on navigation. Imported `readEntryContextRoute` (already exported). Typecheck + full suite (50 tests) pass.
 
 DEVANA-KEY: src/admin.tsx:819 | patched-action-survives-navigation
-DEVANA-SUMMARY: open | P2 | high | mergeActionResultPatch state persists across entry navigation because the field load effect does not depend on route entry id.
+DEVANA-SUMMARY: fixed | P2 | high | The field load effect now depends on an entryKey (collection/entryId/locale), so a result-patched descriptor is reset on entry navigation instead of persisting onto a different entry; in-entry value edits still don't reload.

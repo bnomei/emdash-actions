@@ -37,6 +37,7 @@ import {
   fieldActionTarget,
   contextForAction,
   readActionContextValue,
+  readEntryContextRoute,
   resolveDashboardContext,
   resolveFieldContext,
 } from "./admin-context";
@@ -824,6 +825,16 @@ function ActionButtonFieldContent({
   lifetime.current ??= new AbortController();
   const i18n = useActionI18n(mergeI18n(contextI18n(context), options?.i18n));
   const targetType = fieldActionTarget(context, { id, label, required, value }).type;
+  // Entry identity drives a manifest reload so a result-patched descriptor
+  // (label/confirm/tone/disabled/payload from a prior run) does not survive
+  // client-side navigation to a different entry. It changes only on entry
+  // navigation, not on in-entry value edits, preserving inline form state.
+  const entryRoute = readEntryContextRoute();
+  const entryKey = [
+    context?.collection ?? entryRoute.collection ?? "",
+    context?.entryId ?? entryRoute.entryId ?? "",
+    context?.entryLocale ?? entryRoute.entryLocale ?? "",
+  ].join(" ");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -870,7 +881,9 @@ function ActionButtonFieldContent({
     // keystroke would reset inline `setFormValues` and discard user input.
     // The live `value` is re-merged into the payload at submit time in
     // `runFieldAction`, so the resolved descriptor does not need to track it.
-  }, [label, options, targetType]);
+    // `entryKey` is included so navigating to a different entry reloads the
+    // manifest and clears any result-patched descriptor from a prior entry.
+  }, [label, options, targetType, entryKey]);
 
   useEffect(() => {
     return () => {
@@ -893,7 +906,7 @@ function ActionButtonFieldContent({
     return () => {
       runAbortController.current?.abort();
     };
-  }, [label, options, targetType, value]);
+  }, [label, options, targetType, value, entryKey]);
 
   function clearFieldFeedback() {
     if (feedbackTimer.current) {
