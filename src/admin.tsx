@@ -80,6 +80,7 @@ import {
 import {
   isErrorResult,
   isSuccessfulTerminalResult,
+  normalizePollResult,
   readJobStatus,
   resultPhase,
   resultToneStatus,
@@ -1399,7 +1400,7 @@ async function pollActionStatus(
     response,
     formatActionMessage("failedToPollAction", i18n, { action: actionLabel(action, i18n ?? {}) }),
   );
-  return normalizeActionRunResult(action, result);
+  return normalizePollResult(action, statusRoute, result);
 }
 
 function showActionToasts(result: ActionRunResult, i18n: ActionsI18nConfig) {

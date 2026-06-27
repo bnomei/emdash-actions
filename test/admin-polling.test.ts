@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   isErrorResult,
   isSuccessfulTerminalResult,
+  normalizePollResult,
   pollDelayMs,
   shouldContinuePolling,
   waitForActionResult,
@@ -136,5 +137,24 @@ describe("admin action polling", () => {
   it("clamps poll delays from result and action options", () => {
     expect(pollDelayMs(action, { pollAfterMs: 10 })).toBe(250);
     expect(pollDelayMs({ ...action, pollIntervalMs: 60000 }, {})).toBe(30000);
+  });
+
+  it("keeps polling on a plain-string status body instead of ending early", () => {
+    // A bare-string poll body is progress text; it must stay non-terminal and
+    // preserve the status route so the loop continues, not report success.
+    const pending = normalizePollResult(action, "jobs/1", "still working");
+    expect(pending).toEqual({
+      ok: true,
+      status: 202,
+      statusRoute: "jobs/1",
+      message: "still working",
+    });
+    expect(shouldContinuePolling(pending)).toBe(true);
+    expect(isSuccessfulTerminalResult(pending)).toBe(false);
+
+    // A JSON envelope still normalizes through to a terminal success.
+    expect(
+      normalizePollResult(action, "jobs/1", { ok: true, status: 200, jobStatus: "succeeded" }),
+    ).toEqual({ ok: true, status: 200, jobStatus: "succeeded" });
   });
 });

@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P2 | Confidence: medium | Security-sensitive: no | Status: open
+Priority: P2 | Confidence: medium | Security-sensitive: no | Status: fixed
 Location: src/admin-effects.ts:56 | Slug: string-poll-ends-early
 
 # Plain-string poll body is normalized to terminal success, ending polling early
@@ -70,6 +70,7 @@ call, not for status polls.
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `pollActionStatus` reused `normalizeActionRunResult` for status polls, so a bare-string poll body became `{ ok: true, status: 200, message }` (no jobStatus) → `shouldContinuePolling` false → loop exited and reported a still-running job as terminal success. Implemented the report's "string-as-success only for the initial call" option: added an exported `normalizePollResult(action, statusRoute, value)` in admin-polling.ts that, for a string body, returns `{ ok: true, status: 202, statusRoute, message }` (keeps polling, preserves the route, surfaces the text as progress) and otherwise delegates to `normalizeActionRunResult`. `pollActionStatus` now calls it; the initial run call still uses `normalizeActionRunResult` (a string there is a legitimate sync result). No import cycle (admin-polling → admin-effects is one-directional). Added a regression test. Typecheck + polling tests (7) pass.
 
 DEVANA-KEY: src/admin-effects.ts:56 | P2 | string-poll-ends-early
-DEVANA-SUMMARY: Status=open | P2 medium src/admin-effects.ts:56 - A plain-string status poll body is normalized to {ok:true,status:200} with no jobStatus, so polling ends and a still-running job is reported as a successful terminal result.
+DEVANA-SUMMARY: Status=fixed | P2 medium src/admin-effects.ts:56 - Status polls now route string bodies through normalizePollResult, which keeps the job polling (status 202 + statusRoute) instead of reporting a still-running job as a terminal success.

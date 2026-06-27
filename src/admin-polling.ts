@@ -1,6 +1,7 @@
 import { normalizePluginRoute } from "./shared";
 import { sleep as defaultSleep, throwIfAborted } from "./admin-cancellation";
 import { asRecord, numberOrNull } from "./admin-manifest";
+import { normalizeActionRunResult } from "./admin-effects";
 import type { ActionManifestDescriptor, ActionRunResult } from "./types";
 import { localizedString } from "./i18n";
 
@@ -62,6 +63,24 @@ export async function waitForActionResult<TAction extends ActionManifestDescript
   }
 
   return result;
+}
+
+export function normalizePollResult(
+  action: Pick<ActionManifestDescriptor, "resultEffect">,
+  statusRoute: string,
+  value: unknown,
+): ActionRunResult {
+  // A bare-string status-poll body is progress text, not a terminal envelope.
+  // `normalizeActionRunResult` would turn it into `{ ok: true, status: 200 }`
+  // (no jobStatus), which `shouldContinuePolling` reads as terminal success and
+  // ends the loop while the job is still running. Keep it polling instead by
+  // emitting status 202 and preserving the status route. Providers signal
+  // completion with a JSON envelope (jobStatus / status 200), not a plain
+  // string.
+  if (typeof value === "string") {
+    return { ok: true, status: 202, statusRoute, message: value };
+  }
+  return normalizeActionRunResult(action, value);
 }
 
 export function shouldStartPolling(
