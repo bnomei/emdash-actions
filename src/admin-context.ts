@@ -144,6 +144,10 @@ export function fieldActionTarget(
   }
 
   if (contextTarget?.type === "row") return contextTarget;
+  // Preserve an authoritative entry surface supplied by the host so that
+  // manifest actions declared with `target: { surfaces: ["entry"] }` still
+  // match and submit from a field widget, mirroring the dashboard path.
+  if (contextTarget?.type === "entry") return contextTarget;
 
   const route = readEntryContextRoute();
   return compactTarget({

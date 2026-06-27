@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P2 | Confidence: medium | Security-sensitive: no | Status: open
+Priority: P2 | Confidence: medium | Security-sensitive: no | Status: fixed
 Location: src/admin-context.ts:134 | Slug: field-target-drops-entry
 
 # `fieldActionTarget` ignores host entry surface context
@@ -48,6 +48,7 @@ After working this report, preserve the original finding body. Update line 2 `St
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `fieldActionTarget` passed through only `field` and `row` context targets, dropping a host-supplied `entry` target into a synthetic `type: "field"` target (so `actionMatchesTargetRequirement(action, "field")` failed for `surfaces: ["entry"]` actions). Added an `entry` passthrough branch mirroring `row`. Added a test asserting an `{ surface: "entry" }` context yields a `type: "entry"` target from a field widget. Typecheck + context tests pass.
 
 DEVANA-KEY: src/admin-context.ts:134 | P2 | field-target-drops-entry
-DEVANA-SUMMARY: Status=open | P2 medium src/admin-context.ts:134 - Field widgets downgrade entry surface context to type field, so entry-targeted manifest actions never match or submit correctly.
+DEVANA-SUMMARY: Status=fixed | P2 medium src/admin-context.ts:134 - Field widgets now preserve a host-supplied entry surface target, so entry-targeted manifest actions match and submit correctly.

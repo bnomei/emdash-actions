@@ -101,6 +101,21 @@ describe("admin context and route helpers", () => {
     });
   });
 
+  it("preserves an entry surface target supplied to a field widget", () => {
+    expect(
+      fieldActionTarget(
+        { collection: "posts", entryId: "post-1", entryLocale: "en", surface: "entry" },
+        { id: "field-title", value: "Hello" },
+      ),
+    ).toEqual({
+      collection: "posts",
+      entryId: "post-1",
+      locale: "en",
+      surface: "entry",
+      type: "entry",
+    });
+  });
+
   it("derives targets from compatibility context when provided", () => {
     expect(
       actionTargetFromContext({
