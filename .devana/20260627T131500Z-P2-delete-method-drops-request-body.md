@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | high | security=no
+DEVANA-STATE: fixed | P2 | high | security=no
 DEVANA-KEY: src/admin-invocation.ts:98 | delete-method-drops-request-body
 
 # DELETE direct action silently drops its entire request body
@@ -88,6 +88,7 @@ unless the finding moves.
 
 - 2026-06-27: open by Devana. Static trace confirmed at admin-invocation.ts:98-101,
   admin-manifest.ts:686-688, and call site admin.tsx:1351.
+- 2026-06-27: fixed. Confirmed `actionRequestInit` attached a body only when `hasJsonBody(method)` (false for DELETE), so a direct DELETE action's computed body (form values, payload defaults, contextKey value) was silently dropped despite passing validation. Implemented the report's first option but scoped to avoid forcing bodies onto bodyless deletes: compute `body` once, and attach it (with `Content-Type: application/json`) when `hasJsonBody(method)` OR the body is a non-empty object. So a DELETE with form/payload/context now transmits its parameters, while a parameterless DELETE still sends no body (convention preserved). Runner actions are always POST, so unaffected. Added tests: DELETE with `{ scope: "drafts" }` sends that JSON body + content-type; parameterless DELETE sends no body and no content-type. Typecheck + invocation tests (11) pass.
 
 DEVANA-KEY: src/admin-invocation.ts:98 | delete-method-drops-request-body
-DEVANA-SUMMARY: open | P2 | high | A direct action with method DELETE drops its computed request body (form values, payload defaults, contextKey value) because actionRequestInit omits the body when hasJsonBody is false.
+DEVANA-SUMMARY: fixed | P2 | high | actionRequestInit now also attaches a JSON body for DELETE when the action computed non-empty content (form/payload/context), so direct DELETE actions no longer silently drop their input; parameterless DELETEs stay bodyless.

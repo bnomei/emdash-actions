@@ -95,9 +95,15 @@ export function actionRequestInit(
   const headers = new Headers();
   const init: RequestInit = { headers, method, signal };
 
-  if (hasJsonBody(method)) {
+  const body = actionRequestBody(action, context, target, payload);
+  // Attach a JSON body for body-ful methods, and also for DELETE when the
+  // action actually computed parameters (form values, payload defaults, or a
+  // contextKey value). Without this, a direct DELETE action would silently
+  // drop that input. A parameterless DELETE still sends no body.
+  const hasBodyContent = typeof body === "object" && body !== null && Object.keys(body).length > 0;
+  if (hasJsonBody(method) || hasBodyContent) {
     headers.set("Content-Type", "application/json");
-    init.body = JSON.stringify(actionRequestBody(action, context, target, payload));
+    init.body = JSON.stringify(body);
   }
 
   return init;

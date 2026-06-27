@@ -41,6 +41,41 @@ describe("admin action invocation requests", () => {
     expect(init.body).toBe(JSON.stringify({ static: true, value: "from-manifest" }));
   });
 
+  it("sends a JSON body for a DELETE action that carries form/payload input", () => {
+    const action = {
+      id: "purge",
+      label: "Purge",
+      method: "DELETE" as const,
+      provider,
+      route: "purge",
+      targetPluginId: "source",
+    };
+
+    const init = actionRequestInit(action, undefined, undefined, undefined, { scope: "drafts" });
+
+    expect(init.method).toBe("DELETE");
+    expect(init.headers).toBeInstanceOf(Headers);
+    expect((init.headers as Headers).get("Content-Type")).toBe("application/json");
+    expect(init.body).toBe(JSON.stringify({ scope: "drafts" }));
+  });
+
+  it("sends no body for a parameterless DELETE action", () => {
+    const action = {
+      id: "purge",
+      label: "Purge",
+      method: "DELETE" as const,
+      provider,
+      route: "purge",
+      targetPluginId: "source",
+    };
+
+    const init = actionRequestInit(action, undefined, undefined);
+
+    expect(init.method).toBe("DELETE");
+    expect(init.body).toBeUndefined();
+    expect((init.headers as Headers).get("Content-Type")).toBe(null);
+  });
+
   it("posts runner actions to the provider runner route as ActionInvocation", () => {
     const context: ActionButtonContext = {
       currentUser: { id: "user-1" },
