@@ -986,8 +986,11 @@ function ActionButtonFieldContent({
       if (isSuccessfulTerminalResult(finalResult)) {
         const patchedAction = mergeActionResultPatch(action, finalResult);
         if (patchedAction) setAction(patchedAction);
-        await runActionEffects(action, finalResult);
+        // Commit the field writeback before running effects so an unrelated
+        // effect failure (e.g. denied clipboard permission) cannot leave the
+        // field showing stale data after a successful server mutation.
         applyFieldResultValue(finalResult, options, onChange);
+        await runActionEffects(action, finalResult);
         if (patchedAction && actionPatchChangesLabel(finalResult)) {
           clearFieldFeedback();
         } else {

@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P2 | Confidence: high | Security-sensitive: no | Status: open
+Priority: P2 | Confidence: high | Security-sensitive: no | Status: fixed
 Location: src/admin.tsx:962 | Slug: result-writeback-blocked-by-effect
 
 # `resultValueKey` writeback is skipped when a result effect throws
@@ -50,6 +50,7 @@ After working this report, preserve the original finding body. Update line 2 `St
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed the success branch awaited `runActionEffects` before `applyFieldResultValue`, so a throwing effect (e.g. denied clipboard) jumped to the catch and skipped the field writeback. Reordered: `applyFieldResultValue(finalResult, options, onChange)` now runs immediately after the descriptor patch and before `await runActionEffects(...)`, so the `resultValueKey` writeback commits independently of optional browser effects. Typecheck + effects tests pass.
 
 DEVANA-KEY: src/admin.tsx:962 | P2 | result-writeback-blocked-by-effect
-DEVANA-SUMMARY: Status=open | P2 high src/admin.tsx:962 - resultValueKey field writeback is sequenced after runActionEffects, so a failing clipboard/download/open effect prevents updating the field on success.
+DEVANA-SUMMARY: Status=fixed | P2 high src/admin.tsx:962 - resultValueKey field writeback now runs before runActionEffects, so a failing clipboard/download/open effect no longer prevents updating the field on success.
