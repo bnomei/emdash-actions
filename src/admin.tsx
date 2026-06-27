@@ -358,6 +358,8 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   const [formValuesByKey, setFormValuesByKey] = useState<Record<string, ActionFormValues>>({});
   const feedbackTimers = useRef<Record<string, FeedbackTimer>>({});
   const runAbortControllers = useRef<Record<string, AbortController>>({});
+  const lifetime = useRef<AbortController | null>(null);
+  lifetime.current ??= new AbortController();
   const responseI18n = state.status === "ready" ? state.i18n : undefined;
   const i18n = useActionI18n(mergeI18n(contextI18n(context), responseI18n));
   const targetType = dashboardActionTarget(context).type;
@@ -395,6 +397,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         controller.abort();
       }
       runAbortControllers.current = {};
+      lifetime.current?.abort();
     };
   }, []);
 
@@ -505,7 +508,9 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
       showActionToasts(finalResult, i18n);
       if (isSuccessfulTerminalResult(finalResult)) {
         const updated = applyActionUpdate(action, finalResult);
-        await runActionEffects(action, finalResult);
+        await runActionEffects(action, finalResult, {
+          reloadSignal: lifetime.current?.signal,
+        });
         if (updated && actionPatchChangesLabel(finalResult)) {
           clearActionFeedback(action.key);
         } else {
@@ -815,6 +820,8 @@ function ActionButtonFieldContent({
   const feedbackTimer = useRef<FeedbackTimer | null>(null);
   const runAbortController = useRef<AbortController | null>(null);
   const runInFlight = useRef(false);
+  const lifetime = useRef<AbortController | null>(null);
+  lifetime.current ??= new AbortController();
   const i18n = useActionI18n(mergeI18n(contextI18n(context), options?.i18n));
   const targetType = fieldActionTarget(context, { id, label, required, value }).type;
 
@@ -873,6 +880,7 @@ function ActionButtonFieldContent({
       }
       runAbortController.current?.abort();
       runAbortController.current = null;
+      lifetime.current?.abort();
     };
   }, []);
 
@@ -998,7 +1006,9 @@ function ActionButtonFieldContent({
         // effect failure (e.g. denied clipboard permission) cannot leave the
         // field showing stale data after a successful server mutation.
         applyFieldResultValue(finalResult, options, onChange);
-        await runActionEffects(action, finalResult);
+        await runActionEffects(action, finalResult, {
+          reloadSignal: lifetime.current?.signal,
+        });
         if (patchedAction && actionPatchChangesLabel(finalResult)) {
           clearFieldFeedback();
         } else {

@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | high | security=no
+DEVANA-STATE: fixed | P2 | high | security=no
 DEVANA-KEY: src/admin-effects.ts:328 | reload-timer-survives-unmount
 
 # Scheduled reload timers are not cancelled on widget unmount
@@ -46,6 +46,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `scheduleReload` used a bare `setTimeout` with no handle/teardown, and neither widget's unmount cleanup touched it, so a deferred reload could `dispatchReloadEvent`/`location.reload()` after the initiating widget unmounted. Made `scheduleReload` accept an optional `AbortSignal`: returns early if already aborted, stores the timer id, and registers an `abort` listener that clears it (the timer callback removes the listener when it fires). Threaded a widget-lifetime `AbortController` (lazy `??=` init, aborted in each widget's existing unmount cleanup) through `runActionEffects` via a new `reloadSignal` dependency to the reload call, for both the dashboard and field widgets. Updated the deps type and the existing injected-handler test (scheduleReload now receives a 3rd `signal` arg, `undefined` there). Added a test: an aborting lifetime signal cancels the pending reload (no dispatch/reload), and a pre-aborted signal is a no-op. Typecheck + full suite (50 tests) pass.
 
 DEVANA-KEY: src/admin-effects.ts:328 | reload-timer-survives-unmount
-DEVANA-SUMMARY: open | P2 | high | scheduleReload uses uncancelled setTimeout timers that can fire page reloads after the action widget unmounts.
+DEVANA-SUMMARY: fixed | P2 | high | scheduleReload now takes a widget-lifetime AbortSignal that cancels its timer on unmount, so a deferred reload can no longer fire after the initiating action widget has unmounted.

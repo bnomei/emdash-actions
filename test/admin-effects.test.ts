@@ -119,7 +119,29 @@ describe("admin action effects", () => {
       target: "self",
       url: "/admin/content/posts/entry-1",
     });
-    expect(scheduleReload).toHaveBeenCalledWith(action, { delayMs: 25, scope: "field" });
+    expect(scheduleReload).toHaveBeenCalledWith(action, { delayMs: 25, scope: "field" }, undefined);
+  });
+
+  it("cancels a scheduled reload timer when the lifetime signal aborts", async () => {
+    vi.useFakeTimers();
+    const reload = vi.fn();
+    const dispatchEvent = vi.fn(() => true);
+    vi.stubGlobal("dispatchEvent", dispatchEvent);
+    vi.stubGlobal("location", { reload });
+    const controller = new AbortController();
+
+    // A deferred reload must not fire after its initiating widget unmounts.
+    scheduleReload(action, { delayMs: 5000 }, controller.signal);
+    controller.abort();
+    await vi.runAllTimersAsync();
+
+    expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+
+    // A signal already aborted before scheduling is a no-op.
+    scheduleReload(action, { delayMs: 0 }, controller.signal);
+    await vi.runAllTimersAsync();
+    expect(reload).not.toHaveBeenCalled();
   });
 
   it("isolates a failing effect so remaining effects still run", async () => {

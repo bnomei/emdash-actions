@@ -45,8 +45,15 @@ type ActionEffectDependencies = {
   writeClipboardText?: (text: string) => Promise<void>;
   runDownloadEffect?: (action: ActionEffectTarget, effect: DownloadEffect) => Promise<void>;
   runOpenEffect?: (effect: { url: string; target: ActionResultOpenTarget }) => void;
-  scheduleReload?: (action: ActionManifestDescriptor, effect: ReloadEffect) => void;
+  scheduleReload?: (
+    action: ActionManifestDescriptor,
+    effect: ReloadEffect,
+    signal?: AbortSignal,
+  ) => void;
   onEffectError?: (name: ActionEffectName, error: unknown) => void;
+  // Lifetime signal of the initiating widget; aborts a deferred reload timer
+  // when the widget unmounts so it cannot reload a route the user has left.
+  reloadSignal?: AbortSignal;
 };
 
 export function normalizeActionRunResult(
@@ -259,7 +266,7 @@ export async function runActionEffects(
   });
   await runEffect("reload", () => {
     const reloadEffect = asReloadEffect(effects.reload);
-    if (reloadEffect) reload(action, reloadEffect);
+    if (reloadEffect) reload(action, reloadEffect, dependencies.reloadSignal);
   });
 }
 
@@ -392,15 +399,25 @@ export function triggerDownload(url: string, filename: string | undefined) {
 export function scheduleReload(
   action: Pick<ActionManifestDescriptor, "cooldownMs">,
   effect: ReloadEffect | number | undefined,
+  signal?: AbortSignal,
 ) {
+  // Cancel if the initiating surface has already unmounted, so a deferred
+  // reload does not fire on a route the user has navigated to since.
+  if (signal?.aborted) return;
   const reloadEffect = typeof effect === "number" ? { delayMs: effect } : (effect ?? {});
   const delayMs = reloadEffect.delayMs;
   const delay = clampFeedbackMs(delayMs ?? feedbackCooldownMs(action));
-  globalThis.setTimeout(() => {
+  const timer = globalThis.setTimeout(() => {
+    signal?.removeEventListener("abort", onAbort);
     const scope = reloadEffect.scope ?? "page";
     const shouldContinue = dispatchReloadEvent(action, { ...reloadEffect, scope });
     if (shouldContinue) globalThis.location?.reload();
   }, delay);
+
+  function onAbort() {
+    globalThis.clearTimeout(timer);
+  }
+  signal?.addEventListener("abort", onAbort, { once: true });
 }
 
 function dispatchReloadEvent(
