@@ -37,4 +37,16 @@ describe("normalizeProviders", () => {
 
     expect(result.map((provider) => provider.pluginId)).toEqual(["good-provider"]);
   });
+
+  it("deduplicates provider entries sharing a pluginId, keeping the first", () => {
+    const result = normalizeProviders([
+      { pluginId: "cache-actions", manifestRoute: "actions" },
+      { pluginId: "cache-actions", manifestRoute: "other" },
+      { pluginId: "second" },
+    ]);
+
+    expect(result.map((provider) => provider.pluginId)).toEqual(["cache-actions", "second"]);
+    // The first entry wins (its manifestRoute is kept).
+    expect(result[0]?.manifestRoute).toBe("actions");
+  });
 });

@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P3 | high | security=no
+DEVANA-STATE: fixed | P3 | high | security=no
 DEVANA-KEY: src/admin.tsx:1144 | duplicate-provider-collides-keys
 
 # Duplicate pluginId entries collide action keys and busy state
@@ -43,6 +43,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `normalizeProviders` did not dedupe by pluginId, so two entries with the same pluginId produced colliding `pluginId:action.id` keys (duplicate React list keys + shared busy scope via `isActionBusy`). Applied the report's first suggested option (dedupe by pluginId) in `normalizeProviders`: a `seenPluginIds` set drops later entries that repeat an already-seen normalized pluginId, keeping the first. This composes with the per-provider try/catch isolation from provider-config-fails-all. Silent (no logging convention; consistent with the per-provider skip). Added a test asserting a repeated pluginId is collapsed to one entry (first wins, its manifestRoute kept) while a distinct pluginId is preserved. Typecheck + index tests (4) pass.
 
 DEVANA-KEY: src/admin.tsx:1144 | duplicate-provider-collides-keys
-DEVANA-SUMMARY: open | P3 | high | Duplicate providers entries with the same pluginId produce identical action keys and shared busy state.
+DEVANA-SUMMARY: fixed | P3 | high | normalizeProviders now dedupes provider entries by pluginId (first wins), so duplicate entries can no longer produce colliding action keys or shared busy state.

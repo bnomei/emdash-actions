@@ -160,6 +160,7 @@ export function providersRoute(
 export function normalizeProviders(
   providers: ActionProviderConfig[] | undefined,
 ): NormalizedActionProviderConfig[] {
+  const seenPluginIds = new Set<string>();
   return (providers ?? []).flatMap((provider) => {
     // Isolate each provider: a single invalid plugin id or route must degrade
     // only that provider and leave the others loadable, mirroring the
@@ -167,6 +168,12 @@ export function normalizeProviders(
     // flatMap callback drops just the offending entry.
     try {
       const pluginId = normalizePluginId(provider.pluginId);
+
+      // Drop duplicate provider entries sharing a pluginId: action keys are
+      // `pluginId:action.id`, so a repeat would collide React list keys and
+      // couple busy state across the two buttons. Keep the first entry.
+      if (seenPluginIds.has(pluginId)) return [];
+      seenPluginIds.add(pluginId);
 
       return [
         {
