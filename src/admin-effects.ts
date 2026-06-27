@@ -61,7 +61,7 @@ export function normalizeActionRunResult(
   value: unknown,
 ): ActionRunResult {
   const record = asRecord(value);
-  if (record) return record as ActionRunResult;
+  if (record) return normalizeResultRecord(record);
 
   if (typeof value === "string") {
     const effects = effectsFromResultEffect(action.resultEffect, value);
@@ -92,6 +92,37 @@ export function normalizeActionRunResult(
     status: 200,
     value,
   };
+}
+
+// The object branch is provider-controlled, but the polling classifiers assume
+// a numeric `status` (compared against 202 / >= 400) and a boolean `ok`. Coerce
+// those fields so a wrong-typed value cannot bypass the `typeof === "number"`
+// error guard and misclassify a failure as a successful terminal result.
+function normalizeResultRecord(record: Record<string, unknown>): ActionRunResult {
+  const result = { ...record } as ActionRunResult;
+
+  if ("status" in record) {
+    const status = coerceFiniteNumber(record.status);
+    if (status === null) delete result.status;
+    else result.status = status;
+  }
+
+  // Fail safe: a present but non-boolean `ok` becomes false (an error) rather
+  // than slipping past the `ok === false` check as a non-error.
+  if ("ok" in record && typeof record.ok !== "boolean") {
+    result.ok = record.ok === "true" || record.ok === 1;
+  }
+
+  return result;
+}
+
+function coerceFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 export function effectsFromResultEffect(

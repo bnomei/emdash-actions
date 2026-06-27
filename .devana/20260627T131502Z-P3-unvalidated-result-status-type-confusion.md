@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P3 | medium | security=no
+DEVANA-STATE: fixed | P3 | medium | security=no
 DEVANA-KEY: src/admin-effects.ts:54 | unvalidated-result-status-type-confusion
 
 # Object run-result is cast without validation, so a wrong-typed status misclassifies an error as success
@@ -90,6 +90,7 @@ Preserve the original finding body. Update line 2 `DEVANA-STATE:` and the final
 
 - 2026-06-27: open by Devana. Verified cast at admin-effects.ts:53-54, status
   source at admin.tsx:1353/1368, classification guards at admin-polling.ts:122-134.
+- 2026-06-27: fixed. Confirmed the object branch `return record as ActionRunResult` performed no coercion, so a provider-supplied string `status: "500"` slipped past `isErrorResult`'s `typeof status === "number"` guard and satisfied `isSuccessfulTerminalResult`. Key subtlety: merely *dropping* a bad status does NOT fix it — the classifiers treat "no numeric status" as a non-error/non-202 success — so the object branch now *coerces*: replaced the cast with `normalizeResultRecord`, which coerces `status` via `coerceFiniteNumber` (number kept; numeric string parsed, e.g. "500"→500 and "202"→202; non-numeric dropped) and fails a non-boolean `ok` safe to false (so a malformed ok reads as an error, not a silent success). Both documented counterexamples are fixed: `{status:"500"}`→error, `{status:"202"}`→keeps polling. `jobStatus` needs no change — `readJobStatus` already ignores non-strings. Added tests asserting the coercions. Typecheck + effects tests (12) pass.
 
 DEVANA-KEY: src/admin-effects.ts:54 | unvalidated-result-status-type-confusion
-DEVANA-SUMMARY: open | P3 | medium | normalizeActionRunResult casts an object provider response without validation, so a wrong-typed status field (e.g. the string "500") bypasses the typeof-number error guard and is classified as a successful terminal result.
+DEVANA-SUMMARY: fixed | P3 | medium | normalizeActionRunResult now coerces the object branch (numeric-string status parsed or dropped, non-boolean ok failed safe to false), so a wrong-typed status like "500" is classified as an error instead of a successful terminal result.

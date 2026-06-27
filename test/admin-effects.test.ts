@@ -47,6 +47,29 @@ describe("admin action effects", () => {
     });
   });
 
+  it("coerces wrong-typed status and ok on object results", () => {
+    // A string status would otherwise bypass the typeof-number error guard and
+    // be classified as a successful terminal result.
+    expect(normalizeActionRunResult({}, { status: "500" })).toEqual({ status: 500 });
+    expect(normalizeActionRunResult({}, { status: "202", statusRoute: "jobs/1" })).toEqual({
+      status: 202,
+      statusRoute: "jobs/1",
+    });
+    // A non-numeric status is dropped; a numeric one passes through unchanged.
+    expect(normalizeActionRunResult({}, { status: "weird", message: "x" })).toEqual({
+      message: "x",
+    });
+    expect(normalizeActionRunResult({}, { ok: true, status: 200 })).toEqual({
+      ok: true,
+      status: 200,
+    });
+    // A non-boolean ok fails safe to false.
+    expect(normalizeActionRunResult({}, { ok: "false", status: 200 })).toEqual({
+      ok: false,
+      status: 200,
+    });
+  });
+
   it("merges action patches while preserving null removal semantics", () => {
     const patched = mergeActionPatch(
       {
