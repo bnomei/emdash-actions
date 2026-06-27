@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | high | security=no
+DEVANA-STATE: fixed | P2 | high | security=no
 DEVANA-KEY: src/admin.tsx:904 | field-double-submit-no-guard
 
 # Field run button lacks synchronous in-flight guard
@@ -47,6 +47,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `runFieldAction` relied only on `setBusy(true)` (async) + `disabled={busy}` (next render), leaving a synchronous gap where a same-turn double-click could start a second `callAction`. Added a `runInFlight` ref set synchronously after the confirm check (`if (runInFlight.current) return; runInFlight.current = true;`) and cleared unconditionally in `finally`, mirroring the dashboard `busyKeysRef`/`isActionBusy` guard — a second concurrent click is now ignored rather than superseding. Removed the now-dead `runAbortController.current?.abort()` self-supersede line (no in-flight run can exist past the guard; context-change supersession is still handled by the dedicated abort effect). Typecheck + full suite (49 tests) pass.
 
 DEVANA-KEY: src/admin.tsx:904 | field-double-submit-no-guard
-DEVANA-SUMMARY: open | P2 | high | Field runFieldAction has no synchronous busy guard before the first await, so a double-click can issue overlapping provider requests unlike the dashboard widget.
+DEVANA-SUMMARY: fixed | P2 | high | runFieldAction now has a synchronous runInFlight ref guard (set before the first await, cleared in finally), matching the dashboard busy-key semantics, so a double-click can no longer issue overlapping provider requests.

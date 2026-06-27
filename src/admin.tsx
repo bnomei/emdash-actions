@@ -814,6 +814,7 @@ function ActionButtonFieldContent({
   const [formValues, setFormValues] = useState<ActionFormValues>({});
   const feedbackTimer = useRef<FeedbackTimer | null>(null);
   const runAbortController = useRef<AbortController | null>(null);
+  const runInFlight = useRef(false);
   const i18n = useActionI18n(mergeI18n(contextI18n(context), options?.i18n));
   const targetType = fieldActionTarget(context, { id, label, required, value }).type;
 
@@ -935,7 +936,13 @@ function ActionButtonFieldContent({
     const confirmMessage = localizedString(action.confirm, i18n);
     if (confirmMessage && !confirmDestructiveAction(confirmMessage)) return;
 
-    runAbortController.current?.abort();
+    // Synchronous in-flight guard: `disabled={busy}` only takes effect on the
+    // next render, so a double-click in the same event-loop turn could issue
+    // overlapping provider requests. Ignore re-entry while a run is active,
+    // matching the dashboard `busyKeysRef` semantics.
+    if (runInFlight.current) return;
+    runInFlight.current = true;
+
     const controller = new AbortController();
     runAbortController.current = controller;
 
@@ -1029,6 +1036,7 @@ function ActionButtonFieldContent({
         );
       }
     } finally {
+      runInFlight.current = false;
       if (runAbortController.current === controller) {
         runAbortController.current = null;
         setBusy(false);
