@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | high | security=no
+DEVANA-STATE: fixed | P2 | high | security=no
 DEVANA-KEY: src/admin.tsx:504 | toast-before-effect-failure
 
 # Success toast shown before effects; effect failure leaves contradictory UI
@@ -43,6 +43,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Two layers. (1) The primary reported path — an effect throwing into the catch and setting error button feedback beside the success toast — was already closed earlier this session by effect-failure-aborts-remaining: `runActionEffects` now isolates each effect and never rejects on an individual failure, so a download 404 / clipboard-denied no longer reaches the catch. (2) For the residual case (e.g. a throwing host `onChange` in `applyFieldResultValue`, or any future throwing success step), implemented the report's suggested ordering: moved `showActionToasts(finalResult)` to AFTER the success sequence (patch → writeback → `runActionEffects`) in both `runAction` (dashboard) and `runFieldAction` (field). Kept a `showActionToasts` call in each non-success branch so error/info result toasts still render. Now a failure before the toast call routes to the catch with no success toast shown — toast and button feedback stay coherent. Typecheck + full suite (51 tests) pass.
 
 DEVANA-KEY: src/admin.tsx:504 | toast-before-effect-failure
-DEVANA-SUMMARY: open | P2 | high | showActionToasts runs before runActionEffects, so a success toast can remain visible when a subsequent effect failure sets error button feedback.
+DEVANA-SUMMARY: fixed | P2 | high | showActionToasts now runs after the success sequence commits (and runActionEffects no longer throws), so a success toast can no longer remain beside error button feedback; non-success branches still show their result toasts.

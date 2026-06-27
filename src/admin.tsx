@@ -520,7 +520,6 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
           pollActionStatus(nextAction, statusRoute, signal, i18n),
         controller.signal,
       );
-      showActionToasts(finalResult, i18n);
       if (isSuccessfulTerminalResult(finalResult)) {
         const updated = applyActionUpdate(action, finalResult);
         // Drop cached inline form values when the payload was patched so the
@@ -537,6 +536,10 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         await runActionEffects(action, finalResult, {
           reloadSignal: lifetime.current?.signal,
         });
+        // Show toasts only after the success sequence commits, so a failure
+        // earlier in the branch cannot leave a success toast beside error
+        // button feedback set by the catch.
+        showActionToasts(finalResult, i18n);
         if (updated && actionPatchChangesLabel(finalResult)) {
           clearActionFeedback(action.key);
         } else {
@@ -552,6 +555,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
           );
         }
       } else {
+        showActionToasts(finalResult, i18n);
         setActionFeedback(
           action,
           feedbackFromResult(
@@ -1036,7 +1040,6 @@ function ActionButtonFieldContent({
       // stale completion could patch the descriptor, write the result back
       // through `onChange`, or run effects against superseded context.
       throwIfAborted(controller.signal);
-      showActionToasts(finalResult, i18n);
       if (isSuccessfulTerminalResult(finalResult)) {
         const patchedAction = mergeActionResultPatch(action, finalResult);
         if (patchedAction) {
@@ -1055,6 +1058,10 @@ function ActionButtonFieldContent({
         await runActionEffects(action, finalResult, {
           reloadSignal: lifetime.current?.signal,
         });
+        // Show toasts only after the success sequence commits, so a failure
+        // earlier in the branch cannot leave a success toast beside error
+        // button feedback set by the catch.
+        showActionToasts(finalResult, i18n);
         if (patchedAction && actionPatchChangesLabel(finalResult)) {
           clearFieldFeedback();
         } else {
@@ -1070,6 +1077,7 @@ function ActionButtonFieldContent({
           );
         }
       } else {
+        showActionToasts(finalResult, i18n);
         setFieldFeedback(
           feedbackFromResult(
             action,
