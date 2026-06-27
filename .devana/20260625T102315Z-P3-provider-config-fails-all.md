@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P3 | Confidence: high | Security-sensitive: no | Status: open
+Priority: P3 | Confidence: high | Security-sensitive: no | Status: fixed
 Location: src/index.ts:163 | Slug: provider-config-fails-all
 
 # One invalid provider config aborts the entire providers response
@@ -71,6 +71,7 @@ lazily so one bad entry does not block route registration.
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `normalizeProviders` ran each provider's `normalizePluginId`/`normalizePluginRoute` inside a `flatMap` with no isolation, and `providersRoute` is called eagerly in `createPlugin`, so one bad id/route threw out of the whole response and disabled every provider. Wrapped the per-provider normalization in try/catch returning `[]` on failure, so the offending provider is dropped and valid ones still load — matching the admin-side per-provider `ProviderError` isolation. Chose skip-and-keep (the report's primary suggestion); silent because the response type has no per-provider error channel server-side (the admin loader already surfaces missing/failed providers). Added test/index.test.ts covering valid normalization, an invalid id dropped while neighbours survive, and an invalid route dropped. Typecheck + new tests (3) pass.
 
 DEVANA-KEY: src/index.ts:163 | P3 | provider-config-fails-all
-DEVANA-SUMMARY: Status=open | P3 high src/index.ts:163 - normalizeProviders throws on the first invalid provider id/route, aborting the entire providers response and disabling all providers, unlike the admin-side per-provider error isolation.
+DEVANA-SUMMARY: Status=fixed | P3 high src/index.ts:163 - normalizeProviders now isolates each provider in try/catch, so an invalid id/route drops only that provider and the rest of the providers response still loads.

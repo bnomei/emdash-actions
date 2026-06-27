@@ -161,21 +161,29 @@ export function normalizeProviders(
   providers: ActionProviderConfig[] | undefined,
 ): NormalizedActionProviderConfig[] {
   return (providers ?? []).flatMap((provider) => {
-    const pluginId = normalizePluginId(provider.pluginId);
+    // Isolate each provider: a single invalid plugin id or route must degrade
+    // only that provider and leave the others loadable, mirroring the
+    // admin-side per-provider ProviderError handling. Returning [] from the
+    // flatMap callback drops just the offending entry.
+    try {
+      const pluginId = normalizePluginId(provider.pluginId);
 
-    return [
-      {
-        ...provider,
-        pluginId,
-        allowedTargetPluginIds: (provider.allowedTargetPluginIds ?? []).map(normalizePluginId),
-        manifestRoute: normalizePluginRoute(
-          provider.manifestRoute?.trim() || DEFAULT_MANIFEST_ROUTE,
-        ),
-        ...(provider.runnerRoute
-          ? { runnerRoute: normalizePluginRoute(provider.runnerRoute.trim()) }
-          : {}),
-      },
-    ];
+      return [
+        {
+          ...provider,
+          pluginId,
+          allowedTargetPluginIds: (provider.allowedTargetPluginIds ?? []).map(normalizePluginId),
+          manifestRoute: normalizePluginRoute(
+            provider.manifestRoute?.trim() || DEFAULT_MANIFEST_ROUTE,
+          ),
+          ...(provider.runnerRoute
+            ? { runnerRoute: normalizePluginRoute(provider.runnerRoute.trim()) }
+            : {}),
+        },
+      ];
+    } catch {
+      return [];
+    }
   });
 }
 
