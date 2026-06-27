@@ -8,6 +8,7 @@ import {
   mergeActionPatch,
   normalizeActionRunResult,
   runActionEffects,
+  runOpenEffect,
   safeBrowserUrl,
   scheduleReload,
 } from "../src/admin-effects";
@@ -138,6 +139,41 @@ describe("admin action effects", () => {
 
     expect(safeBrowserUrl("/admin").href).toBe("http://localhost/admin");
     expect(() => safeBrowserUrl("javascript:alert(1)")).toThrow(/must use http/);
+
+    // Protocol-relative and cross-origin URLs resolve to a foreign origin but
+    // pass the protocol check; the sameOrigin option must reject them.
+    expect(safeBrowserUrl("//evil.example/x").href).toBe("http://evil.example/x");
+    expect(() => safeBrowserUrl("//evil.example/x", { sameOrigin: true })).toThrow(
+      /current origin/,
+    );
+    expect(() => safeBrowserUrl("https://evil.example/x", { sameOrigin: true })).toThrow(
+      /current origin/,
+    );
+    expect(safeBrowserUrl("/admin", { sameOrigin: true }).href).toBe("http://localhost/admin");
+  });
+
+  it("blocks off-origin same-tab navigation from open effects", () => {
+    const assign = vi.fn();
+    const open = vi.fn();
+    vi.stubGlobal("location", { assign });
+    vi.stubGlobal("open", open);
+
+    // Same-tab navigation must stay same-origin.
+    expect(() => runOpenEffect({ url: "//evil.example/phish", target: "self" })).toThrow(
+      /current origin/,
+    );
+    expect(assign).not.toHaveBeenCalled();
+
+    runOpenEffect({ url: "/admin/page", target: "self" });
+    expect(assign).toHaveBeenCalledWith("http://localhost/admin/page");
+
+    // New-tab opens stay permissive but isolated with noopener,noreferrer.
+    runOpenEffect({ url: "//external.example/docs", target: "blank" });
+    expect(open).toHaveBeenCalledWith(
+      "http://external.example/docs",
+      "_blank",
+      "noopener,noreferrer",
+    );
   });
 
   it("dispatches scoped reload events and falls back to page reload when unhandled", async () => {

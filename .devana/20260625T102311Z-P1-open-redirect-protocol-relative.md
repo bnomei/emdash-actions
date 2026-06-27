@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P1 | Confidence: high | Security-sensitive: yes | Status: open
+Priority: P1 | Confidence: high | Security-sensitive: yes | Status: fixed
 Location: src/admin-effects.ts:360 | Slug: open-redirect-protocol-relative
 
 # Open effect allows off-origin navigation via protocol-relative URL
@@ -70,6 +70,7 @@ In `safeBrowserUrl`, after resolving, reject URLs whose origin differs from
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection. No exploit recipe included.
+- 2026-06-27: fixed. Confirmed `safeBrowserUrl` checked only `url.protocol`, so a protocol-relative `//evil.example` (or absolute cross-origin) URL passed and `runOpenEffect` with `target: "self"` drove `location.assign` off-origin — a forced-redirect/phishing primitive against the authenticated admin. Added a `sameOrigin` option to `safeBrowserUrl` (rejects when `url.origin !== base.origin`) and made `runOpenEffect`'s `self` branch use it. Scope is deliberate: `target: "blank"` (new tab, noopener,noreferrer) stays permissive because opening external links is an intended feature; only in-place navigation is constrained. Download paths are unchanged (cross-origin CDN downloads are legitimate). Added tests: `safeBrowserUrl` rejects protocol-relative + cross-origin under `sameOrigin`; `runOpenEffect` throws on off-origin self-nav, allows same-origin self-nav, and still opens external blank tabs. Typecheck + effects tests (8) pass.
 
 DEVANA-KEY: src/admin-effects.ts:360 | P1 | open-redirect-protocol-relative
-DEVANA-SUMMARY: Status=open | P1 high src/admin-effects.ts:360 - safeBrowserUrl only checks protocol, so a server-controlled open effect with a protocol-relative URL (e.g. //evil.example) navigates the admin off-origin via location.assign.
+DEVANA-SUMMARY: Status=fixed | P1 high src/admin-effects.ts:360 - Same-tab (target:self) open-effect navigation is now restricted to the current origin via a sameOrigin check, blocking protocol-relative/cross-origin forced redirects of the admin; new-tab opens remain permissive with noopener,noreferrer.

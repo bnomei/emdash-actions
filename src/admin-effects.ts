@@ -318,11 +318,16 @@ function readReloadScope(value: unknown): ActionReloadScope | undefined {
 }
 
 export function runOpenEffect(effect: { url: string; target: ActionResultOpenTarget }) {
-  const url = safeBrowserUrl(effect.url);
   if (effect.target === "self") {
+    // Same-tab navigation replaces the authenticated admin in place, so a
+    // server-controlled `open` effect must not redirect it off-origin (e.g. a
+    // protocol-relative `//evil.example` value). New-tab opens stay permissive
+    // (external links are a feature) but use noopener,noreferrer.
+    const url = safeBrowserUrl(effect.url, { sameOrigin: true });
     globalThis.location.assign(url.href);
     return;
   }
+  const url = safeBrowserUrl(effect.url);
   globalThis.open(url.href, "_blank", "noopener,noreferrer");
 }
 
@@ -392,11 +397,18 @@ function dispatchReloadEvent(
   );
 }
 
-export function safeBrowserUrl(value: string) {
+export function safeBrowserUrl(value: string, options: { sameOrigin?: boolean } = {}) {
   const base = typeof window === "undefined" ? "http://localhost" : window.location.href;
   const url = new URL(value, base);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Action URL must use http, https, or be relative.");
+  }
+  // A protocol-relative or absolute cross-origin URL passes the protocol check
+  // but resolves to a foreign origin. Callers that drive same-tab navigation
+  // must opt into a strict same-origin check to avoid a forced off-origin
+  // redirect of the authenticated admin.
+  if (options.sameOrigin && url.origin !== new URL(base).origin) {
+    throw new Error("Action URL must stay on the current origin.");
   }
   return url;
 }
