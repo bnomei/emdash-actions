@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P2 | Confidence: high | Security-sensitive: no | Status: open
+Priority: P2 | Confidence: high | Security-sensitive: no | Status: fixed
 Location: src/admin-polling.ts:130 | Slug: succeeded-202-skips-effects
 
 # Terminal `jobStatus: "succeeded"` with HTTP 202 skips success handling
@@ -54,6 +54,7 @@ After working this report, preserve the original finding body. Update line 2 `St
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `isSuccessfulTerminalResult` gated on `result.status !== 202`, so a terminal `jobStatus: "succeeded"` body with HTTP 202 was treated as non-success while `shouldContinuePolling`/`resultPhase` classified it as success — stranding effects/patches. Added a short-circuit: `readJobStatus(result) === "succeeded"` returns true before the 202 check. Minimal by design — only an explicitly succeeded job overrides the 202 rejection; all other paths (unknown jobStatus, plain 202 accepted) are unchanged. Added a regression test asserting `shouldContinuePolling` false and `isSuccessfulTerminalResult` true for `{ jobStatus: "succeeded", status: 202 }`. Typecheck + polling tests pass.
 
 DEVANA-KEY: src/admin-polling.ts:130 | P2 | succeeded-202-skips-effects
-DEVANA-SUMMARY: Status=open | P2 high src/admin-polling.ts:130 - A succeeded async job still carrying status 202 skips success effects and patches because isSuccessfulTerminalResult rejects all 202 responses.
+DEVANA-SUMMARY: Status=fixed | P2 high src/admin-polling.ts:130 - A succeeded async job carrying status 202 now passes isSuccessfulTerminalResult, so success effects and patches run consistently with resultPhase.

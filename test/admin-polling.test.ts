@@ -91,6 +91,10 @@ describe("admin action polling", () => {
     expect(isSuccessfulTerminalResult({ jobStatus: "succeeded", ok: true, status: 200 })).toBe(
       true,
     );
+    expect(shouldContinuePolling({ jobStatus: "succeeded", ok: true, status: 202 })).toBe(false);
+    expect(isSuccessfulTerminalResult({ jobStatus: "succeeded", ok: true, status: 202 })).toBe(
+      true,
+    );
     expect(
       isSuccessfulTerminalResult({
         effects: { reload: { scope: "entry" } },

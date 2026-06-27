@@ -130,6 +130,9 @@ export function isErrorResult(result: ActionRunResult) {
 export function isSuccessfulTerminalResult(result: ActionRunResult) {
   if (isErrorResult(result)) return false;
   if (shouldContinuePolling(result)) return false;
+  // A terminally-succeeded job is a success even if the provider kept HTTP 202
+  // on the final poll body; otherwise widgets would skip effects and patches.
+  if (readJobStatus(result) === "succeeded") return true;
   return result.status !== 202;
 }
 
