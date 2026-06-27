@@ -1,3 +1,9 @@
+/**
+ * EmDash admin UI for action triggers: dashboard widget and field button field.
+ *
+ * Widgets load provider manifests per mount/surface, run actions with abort-aware
+ * lifecycles, apply result patches, and dispatch client effects after terminal success.
+ */
 import {
   Badge,
   Banner,
@@ -175,6 +181,7 @@ const actionToastManager = createKumoToastManager();
 
 type DestructiveActionConfirm = (message: string) => boolean;
 
+/** Gate for `confirm`-backed actions; injectable for tests. */
 export function confirmDestructiveAction(
   message: string | undefined,
   confirm: DestructiveActionConfirm = globalThis.confirm.bind(globalThis),
@@ -403,11 +410,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
     };
   }, []);
 
-  // Abort in-flight action runs when the surface filter (`targetType`) changes.
-  // The load effect replaces `state.actions` for the new surface; without this,
-  // a run started under the previous filter could complete and apply effects/
-  // patches against a stale closure action. Aborted runs bail via the abort
-  // guard in waitForActionResult; their finally still clears busy state.
+  // Surface filter changes supersede in-flight dashboard runs.
   useEffect(() => {
     return () => {
       for (const controller of Object.values(runAbortControllers.current)) {
@@ -522,9 +525,6 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
       );
       if (isSuccessfulTerminalResult(finalResult)) {
         const updated = applyActionUpdate(action, finalResult);
-        // Drop cached inline form values when the payload was patched so the
-        // next submit re-seeds from the patched defaults (via
-        // `dashboardFormValues`) instead of the stale user edits.
         if (updated && actionPatchChangesPayload(finalResult)) {
           setFormValuesByKey((current) => {
             if (!(action.key in current)) return current;
@@ -536,9 +536,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         await runActionEffects(action, finalResult, {
           reloadSignal: lifetime.current?.signal,
         });
-        // Show toasts only after the success sequence commits, so a failure
-        // earlier in the branch cannot leave a success toast beside error
-        // button feedback set by the catch.
+        // Toasts run after patches and effects so failures do not pair with success toasts.
         showActionToasts(finalResult, i18n);
         if (updated && actionPatchChangesLabel(finalResult)) {
           clearActionFeedback(action.key);
@@ -823,6 +821,7 @@ function inputTypeForFormField(type: ActionFormField["type"]) {
   return "text";
 }
 
+/** Field widget that runs a provider action or copies a value to the clipboard. */
 export function ActionButtonField(props: FieldWidgetProps<ActionButtonFieldOptions>) {
   return (
     <ActionRuntimeShell>
@@ -854,16 +853,12 @@ function ActionButtonFieldContent({
   lifetime.current ??= new AbortController();
   const i18n = useActionI18n(mergeI18n(contextI18n(context), options?.i18n));
   const targetType = fieldActionTarget(context, { id, label, required, value }).type;
-  // Entry identity drives a manifest reload so a result-patched descriptor
-  // (label/confirm/tone/disabled/payload from a prior run) does not survive
-  // client-side navigation to a different entry. It changes only on entry
-  // navigation, not on in-entry value edits, preserving inline form state.
   const entryRoute = readEntryContextRoute();
   const entryKey = [
     context?.collection ?? entryRoute.collection ?? "",
     context?.entryId ?? entryRoute.entryId ?? "",
     context?.entryLocale ?? entryRoute.entryLocale ?? "",
-  ].join(" ");
+  ].join("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -906,12 +901,7 @@ function ActionButtonFieldContent({
       active = false;
       controller.abort();
     };
-    // `value` is intentionally excluded: re-resolving on every host-field
-    // keystroke would reset inline `setFormValues` and discard user input.
-    // The live `value` is re-merged into the payload at submit time in
-    // `runFieldAction`, so the resolved descriptor does not need to track it.
-    // `entryKey` is included so navigating to a different entry reloads the
-    // manifest and clears any result-patched descriptor from a prior entry.
+    // `value` is merged at submit time; `entryKey` reloads patched descriptors on navigation.
   }, [label, options, targetType, entryKey]);
 
   useEffect(() => {
@@ -926,11 +916,6 @@ function ActionButtonFieldContent({
     };
   }, []);
 
-  // Abort any in-flight run when the bound field value, options, label, or
-  // target change. This supersedes the run so its completion handler bails
-  // (via `throwIfAborted`) instead of writing stale results back into the
-  // now-changed field. It deliberately does not touch `formValues`, so inline
-  // form input is preserved across host-field edits.
   useEffect(() => {
     return () => {
       runAbortController.current?.abort();
@@ -986,10 +971,7 @@ function ActionButtonFieldContent({
     const confirmMessage = localizedString(action.confirm, i18n);
     if (confirmMessage && !confirmDestructiveAction(confirmMessage)) return;
 
-    // Synchronous in-flight guard: `disabled={busy}` only takes effect on the
-    // next render, so a double-click in the same event-loop turn could issue
-    // overlapping provider requests. Ignore re-entry while a run is active,
-    // matching the dashboard `busyKeysRef` semantics.
+    // `disabled={busy}` is render-async; guard double-submit in the same turn.
     if (runInFlight.current) return;
     runInFlight.current = true;
 
@@ -1007,9 +989,6 @@ function ActionButtonFieldContent({
         controller.signal,
       );
       throwIfAborted(controller.signal);
-      // Re-merge the live field value so a stale `valueKey` payload (resolved
-      // before the user edited the field) cannot be submitted while the
-      // descriptor reload is still in flight.
       const liveAction: UiAction = {
         ...action,
         payload: mergeFieldPayload(action.payload, options, value),
@@ -1035,32 +1014,20 @@ function ActionButtonFieldContent({
           pollActionStatus(nextAction, statusRoute, signal, i18n),
         controller.signal,
       );
-      // Bail before committing any state if the field value, options, or
-      // resolved action changed while this run was in flight; otherwise a
-      // stale completion could patch the descriptor, write the result back
-      // through `onChange`, or run effects against superseded context.
       throwIfAborted(controller.signal);
       if (isSuccessfulTerminalResult(finalResult)) {
         const patchedAction = mergeActionResultPatch(action, finalResult);
         if (patchedAction) {
           setAction(patchedAction);
-          // Re-seed inline form values from the patched payload so a server
-          // payload patch sticks; otherwise the just-submitted user edits
-          // would keep winning over the new defaults on the next run.
           if (actionPatchChangesPayload(finalResult)) {
             setFormValues(actionFormInitialValues(patchedAction.form, patchedAction.payload));
           }
         }
-        // Commit the field writeback before running effects so an unrelated
-        // effect failure (e.g. denied clipboard permission) cannot leave the
-        // field showing stale data after a successful server mutation.
         applyFieldResultValue(finalResult, options, onChange);
         await runActionEffects(action, finalResult, {
           reloadSignal: lifetime.current?.signal,
         });
-        // Show toasts only after the success sequence commits, so a failure
-        // earlier in the branch cannot leave a success toast beside error
-        // button feedback set by the catch.
+        // Toasts run after writeback and effects so failures do not pair with success toasts.
         showActionToasts(finalResult, i18n);
         if (patchedAction && actionPatchChangesLabel(finalResult)) {
           clearFieldFeedback();
@@ -1798,17 +1765,17 @@ function jobStatusLabel(status: ActionJobStatus | string, i18n: ActionsI18nConfi
 function progressLabel(progress: unknown) {
   const value = numberOrNull(progress);
   if (value === null) return null;
-  // Progress convention is a fraction 0..1, where 1 means 100% complete (see
-  // examples/async-job.md, which reports `progress: 1` for a finished job).
-  // Values > 1 are leniently treated as already-formed integer percentages.
+  // Provider progress is a 0..1 fraction; values above 1 are treated as percent.
   const normalized = value <= 1 ? value * 100 : value;
   return `${Math.max(0, Math.min(100, Math.round(normalized)))}%`;
 }
 
+/** Dashboard widget registry for the actions plugin admin entry. */
 export const widgets = {
   [WIDGET_ID]: ActionsWidget,
 };
 
+/** Field widget registry; `button` runs manifest or direct provider actions. */
 export const fields = {
   button: ActionButtonField,
 };

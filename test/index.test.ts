@@ -15,8 +15,6 @@ describe("normalizeProviders", () => {
   });
 
   it("isolates an invalid provider and keeps the valid ones", () => {
-    // A single bad plugin id (space + "!") must drop only that provider rather
-    // than throwing out of the whole providers response.
     const result = normalizeProviders([
       { pluginId: "good-provider" },
       { pluginId: "bad id!" },
@@ -46,7 +44,6 @@ describe("normalizeProviders", () => {
     ]);
 
     expect(result.map((provider) => provider.pluginId)).toEqual(["cache-actions", "second"]);
-    // The first entry wins (its manifestRoute is kept).
     expect(result[0]?.manifestRoute).toBe("actions");
   });
 });

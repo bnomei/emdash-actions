@@ -103,8 +103,6 @@ describe("admin action polling", () => {
       ),
     ).rejects.toThrow(/still running/);
 
-    // The first sleep is clamped to the 250ms budget rather than the 1500ms
-    // poll interval, so the timeout fires after ~250ms, not ~1500ms.
     expect(sleep).toHaveBeenCalledTimes(1);
     expect(sleep).toHaveBeenCalledWith(250, undefined);
     expect(pollActionStatus).toHaveBeenCalledTimes(1);
@@ -116,9 +114,6 @@ describe("admin action polling", () => {
     const sleep = vi.fn(async (ms: number) => {
       now += ms;
     });
-    // The status poll resolves with a terminal body, but the run is aborted
-    // (superseded/unmounted) before it returns; waitForActionResult must reject
-    // so the caller does not commit success handling for a stale run.
     const pollActionStatus = vi.fn(async () => {
       controller.abort();
       return { jobStatus: "succeeded" as const, ok: true, status: 200 };
@@ -167,8 +162,6 @@ describe("admin action polling", () => {
       true,
     );
 
-    // A non-canonical in-progress jobStatus must keep polling, not be treated
-    // as a terminal success (status 200) or a stuck state (status 202).
     expect(shouldContinuePolling({ jobStatus: "processing", ok: true, status: 200 })).toBe(true);
     expect(shouldContinuePolling({ jobStatus: "in_progress", ok: true, status: 202 })).toBe(true);
     expect(isSuccessfulTerminalResult({ jobStatus: "processing", ok: true, status: 200 })).toBe(
@@ -190,8 +183,6 @@ describe("admin action polling", () => {
   });
 
   it("keeps polling on a plain-string status body instead of ending early", () => {
-    // A bare-string poll body is progress text; it must stay non-terminal and
-    // preserve the status route so the loop continues, not report success.
     const pending = normalizePollResult(action, "jobs/1", "still working");
     expect(pending).toEqual({
       ok: true,
@@ -202,7 +193,6 @@ describe("admin action polling", () => {
     expect(shouldContinuePolling(pending)).toBe(true);
     expect(isSuccessfulTerminalResult(pending)).toBe(false);
 
-    // A JSON envelope still normalizes through to a terminal success.
     expect(
       normalizePollResult(action, "jobs/1", { ok: true, status: 200, jobStatus: "succeeded" }),
     ).toEqual({ ok: true, status: 200, jobStatus: "succeeded" });

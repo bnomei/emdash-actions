@@ -1,3 +1,10 @@
+/**
+ * Manifest parsing, field-option normalization, and shared readers for action
+ * descriptors returned by provider plugins.
+ *
+ * Parse-time validation is strict: malformed manifests throw before actions
+ * reach the admin UI; tolerant readers elsewhere handle partial result patches.
+ */
 import { DEFAULT_MANIFEST_ROUTE, normalizePluginId, normalizePluginRoute } from "./shared";
 import type {
   ActionButtonFieldOptions,
@@ -56,6 +63,7 @@ const MAX_ACTIONS_PER_PROVIDER = 50;
 const MAX_STRING_LENGTH = 220;
 const ACTION_FORM_FIELD_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$/;
 
+/** Parses and validates a provider manifest payload into typed action descriptors. */
 export function parseActionsManifest(
   value: unknown,
   provider: NormalizedActionProviderConfig,
@@ -424,10 +432,7 @@ function readFormFields(value: unknown, field: string): readonly ActionFormField
     if ((input.type ?? "string") === "select" && (!input.options || input.options.length === 0)) {
       throw new Error(`Action ${field}.${index}.options is required for select fields`);
     }
-    // Reject a default the submit validator would reject (wrong type, or a
-    // select value outside `options`), otherwise the unedited form is silently
-    // unsubmittable. Missing defaults are skipped — the submit path skips them
-    // too. Same rules as `isValidFormFieldValue`, the consumer's check.
+    // Reject defaults the submit validator would reject so untouched forms stay submittable.
     if (
       Object.hasOwn(input, "default") &&
       !isMissingFormFieldValue(input.default) &&
@@ -449,8 +454,7 @@ export function isMissingFormFieldValue(value: unknown) {
   return typeof value === "string" && !value.trim();
 }
 
-// Shared with the submit-time gate so the parser and consumer cannot disagree
-// about which form values are valid (see form-default-unvalidated-blocks-submit).
+/** Submit-time form value gate; shared with parse-time default validation. */
 export function isValidFormFieldValue(field: ActionFormField, value: unknown) {
   const type = field.type ?? "string";
   if (type === "number") return Number.isFinite(typeof value === "number" ? value : Number(value));

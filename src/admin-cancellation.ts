@@ -1,3 +1,9 @@
+/**
+ * AbortSignal helpers shared by polling, context fetch, and action run lifecycles.
+ *
+ * Runs use `AbortController` to supersede stale completions when surfaces,
+ * field values, or widget mounts change mid-flight.
+ */
 export function abortError() {
   return new DOMException("The operation was aborted.", "AbortError");
 }

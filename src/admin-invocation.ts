@@ -1,3 +1,10 @@
+/**
+ * Action invocation assembly: route and method selection, request bodies, and
+ * pre-submit validation for manifest and field-configured actions.
+ *
+ * Runner actions post to the provider runner route; direct actions hit the
+ * action's own plugin route with an optional {@link ActionInvocation} envelope.
+ */
 import { mergeActionContextPayload } from "./admin-context";
 import {
   formOptionValue,
@@ -89,6 +96,7 @@ export function actionRequestBody(
   );
 }
 
+/** Builds fetch init for an action call, including JSON bodies for body-ful methods. */
 export function actionRequestInit(
   action: RunnableAction,
   context: ActionButtonContext | undefined,
@@ -101,11 +109,8 @@ export function actionRequestInit(
   const init: RequestInit = { headers, method, signal };
 
   const body = actionRequestBody(action, context, target, payload);
-  // Attach a JSON body for body-ful methods, and also for DELETE when the
-  // action actually computed parameters (form values, payload defaults, or a
-  // contextKey value). Without this, a direct DELETE action would silently
-  // drop that input. A parameterless DELETE still sends no body.
   const hasBodyContent = typeof body === "object" && body !== null && Object.keys(body).length > 0;
+  // DELETE still carries a JSON body when the action computed parameters.
   if (hasJsonBody(method) || hasBodyContent) {
     headers.set("Content-Type", "application/json");
     init.body = JSON.stringify(body);
@@ -203,6 +208,7 @@ export function actionTargetValidationError(
   return null;
 }
 
+/** Returns the first client-side validation error blocking submit, if any. */
 export function actionSubmitValidationError(
   action: Pick<ActionManifestDescriptor, "form" | "target">,
   target: ActionTarget | undefined,

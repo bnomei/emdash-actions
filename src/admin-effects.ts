@@ -1,3 +1,10 @@
+/**
+ * Action run result normalization, server-driven descriptor patches, and
+ * client-side result effects (clipboard, download, open, reload).
+ *
+ * Effects are isolated per kind so one failure does not skip the rest or
+ * reclassify a provider-successful run as an admin failure.
+ */
 import { apiFetch } from "emdash/plugin-utils";
 import { localizedString } from "./i18n";
 import { providerPluginRoute, normalizePluginRoute } from "./shared";
@@ -51,11 +58,10 @@ type ActionEffectDependencies = {
     signal?: AbortSignal,
   ) => void;
   onEffectError?: (name: ActionEffectName, error: unknown) => void;
-  // Lifetime signal of the initiating widget; aborts a deferred reload timer
-  // when the widget unmounts so it cannot reload a route the user has left.
   reloadSignal?: AbortSignal;
 };
 
+/** Normalizes provider response bodies into the shared {@link ActionRunResult} envelope. */
 export function normalizeActionRunResult(
   action: Pick<ActionManifestDescriptor, "resultEffect">,
   value: unknown,
@@ -94,10 +100,6 @@ export function normalizeActionRunResult(
   };
 }
 
-// The object branch is provider-controlled, but the polling classifiers assume
-// a numeric `status` (compared against 202 / >= 400) and a boolean `ok`. Coerce
-// those fields so a wrong-typed value cannot bypass the `typeof === "number"`
-// error guard and misclassify a failure as a successful terminal result.
 function normalizeResultRecord(record: Record<string, unknown>): ActionRunResult {
   const result = { ...record } as ActionRunResult;
 
@@ -107,9 +109,8 @@ function normalizeResultRecord(record: Record<string, unknown>): ActionRunResult
     else result.status = status;
   }
 
-  // Fail safe: a present but non-boolean `ok` becomes false (an error) rather
-  // than slipping past the `ok === false` check as a non-error.
   if ("ok" in record && typeof record.ok !== "boolean") {
+    // Non-boolean `ok` values fail safe to an error classification.
     result.ok = record.ok === "true" || record.ok === 1;
   }
 
@@ -153,14 +154,9 @@ export function effectsFromResultEffect(
   return null;
 }
 
-// Sentinel returned by `readPatchField` when a patch reader throws, so an
-// invalid field is dropped without being confused for a legitimate `null`.
+// Distinguishes a thrown patch field from a legitimate `null` patch value.
 const PATCH_FIELD_DROP = Symbol("patch-field-drop");
 
-// A successful terminal result must still run effects and (in field mode) the
-// result writeback even when the server attaches a malformed `action` patch.
-// Validate each optional patch field tolerantly: keep what parses, drop what
-// throws, and never abort the post-success sequence over a cosmetic field.
 function readPatchField<T>(read: () => T): T | typeof PATCH_FIELD_DROP {
   try {
     return read();
@@ -261,6 +257,7 @@ export function actionPatchChangesPayload(result: ActionRunResult) {
   return patch !== null && Object.hasOwn(patch, "payload");
 }
 
+/** Dispatches result effects from a terminal run; failures are reported via `onEffectError`. */
 export async function runActionEffects(
   action: ActionEffectTarget,
   result: ActionRunResult,
@@ -275,11 +272,6 @@ export async function runActionEffects(
   const reload = dependencies.scheduleReload ?? scheduleReload;
   const onEffectError = dependencies.onEffectError ?? noopEffectError;
 
-  // Effects are independent, best-effort side effects. Isolate each (parse +
-  // execution) so a failing one — e.g. clipboard denied on plain HTTP, or a
-  // malformed download shape — neither skips the remaining effects (a
-  // requested reload still runs) nor reclassifies a server-successful action
-  // as a failure in the run caller's catch.
   async function runEffect(name: ActionEffectName, run: () => void | Promise<void>) {
     try {
       await run();
@@ -386,10 +378,6 @@ function readReloadScope(value: unknown): ActionReloadScope | undefined {
 
 export function runOpenEffect(effect: { url: string; target: ActionResultOpenTarget }) {
   if (effect.target === "self") {
-    // Same-tab navigation replaces the authenticated admin in place, so a
-    // server-controlled `open` effect must not redirect it off-origin (e.g. a
-    // protocol-relative `//evil.example` value). New-tab opens stay permissive
-    // (external links are a feature) but use noopener,noreferrer.
     const url = safeBrowserUrl(effect.url, { sameOrigin: true });
     globalThis.location.assign(url.href);
     return;
@@ -437,8 +425,7 @@ export function scheduleReload(
   effect: ReloadEffect | number | undefined,
   signal?: AbortSignal,
 ) {
-  // Cancel if the initiating surface has already unmounted, so a deferred
-  // reload does not fire on a route the user has navigated to since.
+  // Widget lifetime: skip reload when the initiating surface has unmounted.
   if (signal?.aborted) return;
   const reloadEffect = typeof effect === "number" ? { delayMs: effect } : (effect ?? {});
   const delayMs = reloadEffect.delayMs;
@@ -474,16 +461,16 @@ function dispatchReloadEvent(
   );
 }
 
+/**
+ * Resolves action URLs for browser effects; `sameOrigin` blocks off-origin
+ * same-tab navigation from server-controlled `open` targets.
+ */
 export function safeBrowserUrl(value: string, options: { sameOrigin?: boolean } = {}) {
   const base = typeof window === "undefined" ? "http://localhost" : window.location.href;
   const url = new URL(value, base);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Action URL must use http, https, or be relative.");
   }
-  // A protocol-relative or absolute cross-origin URL passes the protocol check
-  // but resolves to a foreign origin. Callers that drive same-tab navigation
-  // must opt into a strict same-origin check to avoid a forced off-origin
-  // redirect of the authenticated admin.
   if (options.sameOrigin && url.origin !== new URL(base).origin) {
     throw new Error("Action URL must stay on the current origin.");
   }

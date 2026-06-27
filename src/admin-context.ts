@@ -1,3 +1,9 @@
+/**
+ * Action context and target resolution for dashboard and field trigger surfaces.
+ *
+ * Context may be host-supplied or fetched from EmDash admin APIs; targets
+ * compact that context into the {@link ActionTarget} shape sent with invocations.
+ */
 import { apiFetch, parseApiResponse } from "emdash/plugin-utils";
 import { throwIfAborted } from "./admin-cancellation";
 import {
@@ -70,6 +76,7 @@ export function readActionContextValue(
   return value;
 }
 
+/** Resolves action context when `contextKey` requires a fresh admin snapshot. */
 export async function contextForAction(
   action: Pick<ActionManifestDescriptor, "contextKey">,
   providedContext: ActionButtonContext | undefined,
@@ -121,6 +128,7 @@ export async function resolveDashboardContext(signal?: AbortSignal): Promise<Act
   });
 }
 
+/** Builds the dashboard invocation target from host context or a default surface. */
 export function dashboardActionTarget(context: ActionButtonContext | undefined): ActionTarget {
   return (
     actionTargetFromContext(context) ?? {
@@ -131,6 +139,7 @@ export function dashboardActionTarget(context: ActionButtonContext | undefined):
   );
 }
 
+/** Builds the field invocation target, preserving entry/row surfaces from the host. */
 export function fieldActionTarget(
   context: ActionButtonContext | undefined,
   input: FieldContextInput,
@@ -144,9 +153,6 @@ export function fieldActionTarget(
   }
 
   if (contextTarget?.type === "row") return contextTarget;
-  // Preserve an authoritative entry surface supplied by the host so that
-  // manifest actions declared with `target: { surfaces: ["entry"] }` still
-  // match and submit from a field widget, mirroring the dashboard path.
   if (contextTarget?.type === "entry") return contextTarget;
 
   const route = readEntryContextRoute();
@@ -228,6 +234,7 @@ export function actionTargetFromContext(
   });
 }
 
+/** Derives collection, entry id, and locale from the current admin URL path. */
 export function readEntryContextRoute(): EntryContextRoute {
   if (typeof window === "undefined") return {};
 

@@ -1,3 +1,9 @@
+/**
+ * Async job polling loop and terminal-result classifiers for action runs.
+ *
+ * Polling continues while `statusRoute` is present and the normalized result is
+ * non-terminal; abort signals stop stale completions from committing effects.
+ */
 import { normalizePluginRoute } from "./shared";
 import { sleep as defaultSleep, throwIfAborted } from "./admin-cancellation";
 import { asRecord, numberOrNull } from "./admin-manifest";
@@ -24,6 +30,7 @@ type WaitForActionResultOptions = {
   now?: () => number;
 };
 
+/** Polls `statusRoute` until terminal, timeout, or abort; reports progress between polls. */
 export async function waitForActionResult<TAction extends ActionManifestDescriptor>(
   action: TAction,
   initialResult: ActionRunResult,
@@ -38,8 +45,6 @@ export async function waitForActionResult<TAction extends ActionManifestDescript
   let statusRoute = readStatusRoute(result);
 
   if (!shouldStartPolling(action, result, statusRoute)) {
-    // Guard the non-polling fast path too: an abort between callAction and here
-    // must not let a superseded/unmounted run commit terminal side effects.
     throwIfAborted(signal);
     return result;
   }
@@ -58,36 +63,25 @@ export async function waitForActionResult<TAction extends ActionManifestDescript
       );
     }
 
-    // Clamp the poll delay to the remaining timeout budget so a short
-    // pollTimeoutMs is not overrun by a whole poll interval before the
-    // timeout is enforced on the next iteration.
+    // Clamp sleep to the remaining poll budget so timeout is not overrun by delay.
     await sleep(Math.min(pollDelayMs(action, result), timeoutMs - elapsed), signal);
     result = await pollActionStatus(action, statusRoute, signal);
     statusRoute = readStatusRoute(result) ?? statusRoute;
     pollAtLeastOnce = false;
   }
 
-  // A terminal poll body can resolve after the run was aborted (superseded or
-  // unmounted). Re-check before returning so the caller does not commit
-  // success handling — patches, effects, field writeback, toasts — for a run
-  // that is no longer current.
   throwIfAborted(signal);
   return result;
 }
 
+/** Normalizes a status-poll body; plain strings stay in-progress at HTTP 202. */
 export function normalizePollResult(
   action: Pick<ActionManifestDescriptor, "resultEffect">,
   statusRoute: string,
   value: unknown,
 ): ActionRunResult {
-  // A bare-string status-poll body is progress text, not a terminal envelope.
-  // `normalizeActionRunResult` would turn it into `{ ok: true, status: 200 }`
-  // (no jobStatus), which `shouldContinuePolling` reads as terminal success and
-  // ends the loop while the job is still running. Keep it polling instead by
-  // emitting status 202 and preserving the status route. Providers signal
-  // completion with a JSON envelope (jobStatus / status 200), not a plain
-  // string.
   if (typeof value === "string") {
+    // Progress text must not normalize to a terminal HTTP 200 envelope.
     return { ok: true, status: 202, statusRoute, message: value };
   }
   return normalizeActionRunResult(action, value);
@@ -106,11 +100,7 @@ export function shouldStartPolling(
 export function shouldContinuePolling(result: ActionRunResult) {
   if (result.ok === false) return false;
   const jobStatus = readJobStatus(result);
-  // Per examples/async-job.md, polling continues until jobStatus reaches a
-  // terminal state (succeeded/failed/cancelled). Any other non-empty status —
-  // including non-canonical in-progress labels like "processing" or
-  // "in_progress" — is treated as still pending rather than stopping the loop
-  // in limbo (which would be a false success at 200 or a stuck UI at 202).
+  // Non-canonical in-progress labels keep polling until a terminal jobStatus arrives.
   if (jobStatus) return !isTerminalJobStatus(jobStatus);
   return result.status === 202;
 }
@@ -169,11 +159,11 @@ export function isErrorResult(result: ActionRunResult) {
   return typeof result.status === "number" && result.status >= 400;
 }
 
+/** True when a run has finished successfully and post-success handling may run. */
 export function isSuccessfulTerminalResult(result: ActionRunResult) {
   if (isErrorResult(result)) return false;
   if (shouldContinuePolling(result)) return false;
-  // A terminally-succeeded job is a success even if the provider kept HTTP 202
-  // on the final poll body; otherwise widgets would skip effects and patches.
+  // Terminal `succeeded` wins even when the provider kept HTTP 202 on the final body.
   if (readJobStatus(result) === "succeeded") return true;
   return result.status !== 202;
 }
