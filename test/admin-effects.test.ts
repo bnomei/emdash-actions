@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  actionPatchChangesPayload,
   actionPatchFromResult,
   actionResultEffects,
   asDownloadEffect,
@@ -85,6 +86,13 @@ describe("admin action effects", () => {
     expect(actionPatchFromResult({ action: { icon: 42, disabled: true } })).toEqual({
       disabled: true,
     });
+  });
+
+  it("detects when a result patch changes the action payload", () => {
+    expect(actionPatchChangesPayload({ action: { payload: { format: "short" } } })).toBe(true);
+    expect(actionPatchChangesPayload({ action: { payload: null } })).toBe(true);
+    expect(actionPatchChangesPayload({ action: { label: "Done" } })).toBe(false);
+    expect(actionPatchChangesPayload({ ok: true, status: 200 })).toBe(false);
   });
 
   it("collects top-level effects and dispatches side effects through injectable handlers", async () => {

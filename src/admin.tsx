@@ -51,6 +51,7 @@ import {
 } from "./admin-invocation";
 import {
   actionPatchChangesLabel,
+  actionPatchChangesPayload,
   actionPatchFromResult,
   feedbackCooldownMs,
   mergeActionPatch,
@@ -509,6 +510,17 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
       showActionToasts(finalResult, i18n);
       if (isSuccessfulTerminalResult(finalResult)) {
         const updated = applyActionUpdate(action, finalResult);
+        // Drop cached inline form values when the payload was patched so the
+        // next submit re-seeds from the patched defaults (via
+        // `dashboardFormValues`) instead of the stale user edits.
+        if (updated && actionPatchChangesPayload(finalResult)) {
+          setFormValuesByKey((current) => {
+            if (!(action.key in current)) return current;
+            const next = { ...current };
+            delete next[action.key];
+            return next;
+          });
+        }
         await runActionEffects(action, finalResult, {
           reloadSignal: lifetime.current?.signal,
         });
@@ -1014,7 +1026,15 @@ function ActionButtonFieldContent({
       showActionToasts(finalResult, i18n);
       if (isSuccessfulTerminalResult(finalResult)) {
         const patchedAction = mergeActionResultPatch(action, finalResult);
-        if (patchedAction) setAction(patchedAction);
+        if (patchedAction) {
+          setAction(patchedAction);
+          // Re-seed inline form values from the patched payload so a server
+          // payload patch sticks; otherwise the just-submitted user edits
+          // would keep winning over the new defaults on the next run.
+          if (actionPatchChangesPayload(finalResult)) {
+            setFormValues(actionFormInitialValues(patchedAction.form, patchedAction.payload));
+          }
+        }
         // Commit the field writeback before running effects so an unrelated
         // effect failure (e.g. denied clipboard permission) cannot leave the
         // field showing stale data after a successful server mutation.

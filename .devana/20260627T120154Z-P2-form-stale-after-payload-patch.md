@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | high | security=no
+DEVANA-STATE: fixed | P2 | high | security=no
 DEVANA-KEY: src/admin.tsx:428 | form-stale-after-payload-patch
 
 # Inline form values not reconciled after result.action.payload patch
@@ -47,6 +47,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed a successful `result.action.payload` patch updated `action.payload` but left `formValues`/`formValuesByKey` holding the user's pre-run edits, which keep winning in `actionFormPayload`/`mergeActionPayload` on the next submit. Added `actionPatchChangesPayload(result)` (true when the patch object has a `payload` key, incl. `payload: null`) and gated re-seeding on it. Field path: on a payload patch, `setFormValues(actionFormInitialValues(patchedAction.form, patchedAction.payload))`. Dashboard path: delete the cached `formValuesByKey[action.key]` so `dashboardFormValues` lazily re-seeds from the patched `action.payload` on the next render. Only payload patches trigger re-seed (label-only/no-patch runs leave form state untouched). Added a unit test for the helper. Typecheck + effects/invocation tests (11) pass.
 
 DEVANA-KEY: src/admin.tsx:428 | form-stale-after-payload-patch
-DEVANA-SUMMARY: open | P2 | high | Patched action.payload from a successful result does not update inline form state, so repeat submits send stale form values instead of patched defaults.
+DEVANA-SUMMARY: fixed | P2 | high | After a result patches action.payload, inline form values are re-seeded (field: setFormValues; dashboard: clear cached key to re-seed lazily) so the next submit reflects the patched defaults instead of stale user edits.

@@ -225,6 +225,11 @@ export function actionPatchChangesLabel(result: ActionRunResult) {
   return asRecord(result.action)?.label !== undefined;
 }
 
+export function actionPatchChangesPayload(result: ActionRunResult) {
+  const patch = asRecord(result.action);
+  return patch !== null && Object.hasOwn(patch, "payload");
+}
+
 export async function runActionEffects(
   action: ActionEffectTarget,
   result: ActionRunResult,
