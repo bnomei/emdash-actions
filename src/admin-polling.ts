@@ -1,6 +1,13 @@
+/**
+ * Async job polling loop and terminal-result classifiers for action runs.
+ *
+ * Polling continues while `statusRoute` is present and the normalized result is
+ * non-terminal; abort signals stop stale completions from committing effects.
+ */
 import { normalizePluginRoute } from "./shared";
 import { sleep as defaultSleep, throwIfAborted } from "./admin-cancellation";
 import { asRecord, numberOrNull } from "./admin-manifest";
+import { normalizeActionRunResult } from "./admin-effects";
 import type { ActionManifestDescriptor, ActionRunResult } from "./types";
 import { localizedString } from "./i18n";
 
@@ -23,6 +30,7 @@ type WaitForActionResultOptions = {
   now?: () => number;
 };
 
+/** Polls `statusRoute` until terminal, timeout, or abort; reports progress between polls. */
 export async function waitForActionResult<TAction extends ActionManifestDescriptor>(
   action: TAction,
   initialResult: ActionRunResult,
@@ -36,7 +44,10 @@ export async function waitForActionResult<TAction extends ActionManifestDescript
   let result = initialResult;
   let statusRoute = readStatusRoute(result);
 
-  if (!shouldStartPolling(action, result, statusRoute)) return result;
+  if (!shouldStartPolling(action, result, statusRoute)) {
+    throwIfAborted(signal);
+    return result;
+  }
 
   const timeoutMs = pollTimeoutMs(action);
   const startedAt = now();
@@ -45,19 +56,35 @@ export async function waitForActionResult<TAction extends ActionManifestDescript
   while (statusRoute && (pollAtLeastOnce || shouldContinuePolling(result))) {
     throwIfAborted(signal);
     onProgress(result);
-    if (now() - startedAt > timeoutMs) {
+    const elapsed = now() - startedAt;
+    if (elapsed >= timeoutMs) {
       throw new Error(
         `${localizedString(action.label, undefined, action.id)} is still running. Check the provider job status.`,
       );
     }
 
-    await sleep(pollDelayMs(action, result), signal);
+    // Clamp sleep to the remaining poll budget so timeout is not overrun by delay.
+    await sleep(Math.min(pollDelayMs(action, result), timeoutMs - elapsed), signal);
     result = await pollActionStatus(action, statusRoute, signal);
     statusRoute = readStatusRoute(result) ?? statusRoute;
     pollAtLeastOnce = false;
   }
 
+  throwIfAborted(signal);
   return result;
+}
+
+/** Normalizes a status-poll body; plain strings stay in-progress at HTTP 202. */
+export function normalizePollResult(
+  action: Pick<ActionManifestDescriptor, "resultEffect">,
+  statusRoute: string,
+  value: unknown,
+): ActionRunResult {
+  if (typeof value === "string") {
+    // Progress text must not normalize to a terminal HTTP 200 envelope.
+    return { ok: true, status: 202, statusRoute, message: value };
+  }
+  return normalizeActionRunResult(action, value);
 }
 
 export function shouldStartPolling(
@@ -73,14 +100,19 @@ export function shouldStartPolling(
 export function shouldContinuePolling(result: ActionRunResult) {
   if (result.ok === false) return false;
   const jobStatus = readJobStatus(result);
-  if (jobStatus) return PENDING_JOB_STATUSES.has(jobStatus);
+  // Non-canonical in-progress labels keep polling until a terminal jobStatus arrives.
+  if (jobStatus) return !isTerminalJobStatus(jobStatus);
   return result.status === 202;
+}
+
+export function isTerminalJobStatus(jobStatus: string) {
+  return jobStatus === "succeeded" || FAILED_JOB_STATUSES.has(jobStatus);
 }
 
 export function isTerminalJobResult(result: ActionRunResult) {
   const jobStatus = readJobStatus(result);
   if (jobStatus) {
-    return jobStatus === "succeeded" || FAILED_JOB_STATUSES.has(jobStatus);
+    return isTerminalJobStatus(jobStatus);
   }
   return result.ok === false || (typeof result.status === "number" && result.status !== 202);
 }
@@ -127,9 +159,12 @@ export function isErrorResult(result: ActionRunResult) {
   return typeof result.status === "number" && result.status >= 400;
 }
 
+/** True when a run has finished successfully and post-success handling may run. */
 export function isSuccessfulTerminalResult(result: ActionRunResult) {
   if (isErrorResult(result)) return false;
   if (shouldContinuePolling(result)) return false;
+  // Terminal `succeeded` wins even when the provider kept HTTP 202 on the final body.
+  if (readJobStatus(result) === "succeeded") return true;
   return result.status !== 202;
 }
 

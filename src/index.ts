@@ -1,3 +1,10 @@
+/**
+ * EmDash actions plugin entry: descriptor factory, runtime plugin registration,
+ * and provider normalization for the admin discovery route.
+ *
+ * Host apps register {@link actionsPlugin} in their plugin list; provider plugins
+ * export manifests and routes while this package owns the admin trigger surfaces.
+ */
 import { definePlugin, type PluginDescriptor } from "emdash";
 import {
   DEFAULT_ACTION_RUNNER_ROUTE,
@@ -98,6 +105,7 @@ export {
   providerPluginRoute,
 };
 
+/** Registers the actions dashboard widget and provider discovery options with EmDash. */
 export function actionsPlugin(
   options: ActionsDescriptorOptions = {},
 ): PluginDescriptor<ActionsCreatePluginOptions> {
@@ -122,6 +130,7 @@ export function actionsPlugin(
   };
 }
 
+/** Defines the actions plugin runtime with the `providers` discovery route and admin entry. */
 export function createPlugin(options: ActionsCreatePluginOptions = {}) {
   const providersResponse = providersRoute(options);
 
@@ -157,32 +166,47 @@ export function providersRoute(
   } satisfies ActionsProvidersResponse;
 }
 
+/**
+ * Normalizes provider entries for the discovery response: validates ids and
+ * routes, deduplicates by `pluginId`, and drops invalid entries without failing
+ * the whole list.
+ */
 export function normalizeProviders(
   providers: ActionProviderConfig[] | undefined,
 ): NormalizedActionProviderConfig[] {
+  const seenPluginIds = new Set<string>();
   return (providers ?? []).flatMap((provider) => {
-    const pluginId = normalizePluginId(provider.pluginId);
+    try {
+      const pluginId = normalizePluginId(provider.pluginId);
 
-    return [
-      {
-        ...provider,
-        pluginId,
-        allowedTargetPluginIds: (provider.allowedTargetPluginIds ?? []).map(normalizePluginId),
-        manifestRoute: normalizePluginRoute(
-          provider.manifestRoute?.trim() || DEFAULT_MANIFEST_ROUTE,
-        ),
-        ...(provider.runnerRoute
-          ? { runnerRoute: normalizePluginRoute(provider.runnerRoute.trim()) }
-          : {}),
-      },
-    ];
+      if (seenPluginIds.has(pluginId)) return [];
+      seenPluginIds.add(pluginId);
+
+      return [
+        {
+          ...provider,
+          pluginId,
+          allowedTargetPluginIds: (provider.allowedTargetPluginIds ?? []).map(normalizePluginId),
+          manifestRoute: normalizePluginRoute(
+            provider.manifestRoute?.trim() || DEFAULT_MANIFEST_ROUTE,
+          ),
+          ...(provider.runnerRoute
+            ? { runnerRoute: normalizePluginRoute(provider.runnerRoute.trim()) }
+            : {}),
+        },
+      ];
+    } catch {
+      return [];
+    }
   });
 }
 
+/** Identity helper for provider manifest authoring with type inference. */
 export function defineAction<TAction extends ActionManifestDescriptor>(action: TAction): TAction {
   return action;
 }
 
+/** Identity helper for provider manifest route handlers. */
 export function defineActionsManifest(manifest: ActionsManifest): ActionsManifest {
   return manifest;
 }

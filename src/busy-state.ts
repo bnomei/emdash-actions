@@ -1,3 +1,9 @@
+/**
+ * Immutable busy-key tracking for concurrent action runs in the dashboard widget.
+ *
+ * Keys are scoped as `providerPluginId:actionId` so independent actions can run
+ * in parallel without sharing disabled state.
+ */
 export type BusyKeySet = ReadonlySet<string>;
 
 export function actionBusyKey(providerPluginId: string, actionId: string) {

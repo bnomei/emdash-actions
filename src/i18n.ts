@@ -1,3 +1,9 @@
+/**
+ * Locale resolution and message lookup for action labels, feedback, and admin copy.
+ *
+ * Strings may be plain text or locale maps; resolution walks the configured
+ * fallback chain before falling back to English defaults in {@link DEFAULT_ACTIONS_I18N}.
+ */
 export type LocalizedString = string | Record<string, string | undefined>;
 
 export type ActionsMessageKey =
@@ -73,6 +79,7 @@ export function normalizeLocale(locale: string | null | undefined): string {
   return (locale ?? DEFAULT_LOCALE).trim() || DEFAULT_LOCALE;
 }
 
+/** Ordered locale chain used by {@link localizedString} and {@link actionMessage}. */
 export function localeFallbacks(i18n: ActionsI18nConfig | string | null | undefined): string[] {
   const config = typeof i18n === "string" ? { locale: i18n } : (i18n ?? {});
   const defaultLocale = normalizeLocale(config.defaultLocale ?? DEFAULT_ACTIONS_I18N.defaultLocale);
@@ -96,6 +103,7 @@ export function localeFallbacks(i18n: ActionsI18nConfig | string | null | undefi
   return chain;
 }
 
+/** Resolves a localized string or locale map using the active i18n fallback chain. */
 export function localizedString(
   value: LocalizedString | null | undefined,
   i18n: ActionsI18nConfig | string | null | undefined,
@@ -118,6 +126,7 @@ export function localizedString(
   return first ?? fallback;
 }
 
+/** Looks up a built-in admin message key with optional per-locale overrides. */
 export function actionMessage(
   key: ActionsMessageKey,
   i18n: ActionsI18nConfig | string | null | undefined,

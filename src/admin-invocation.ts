@@ -1,5 +1,17 @@
+/**
+ * Action invocation assembly: route and method selection, request bodies, and
+ * pre-submit validation for manifest and field-configured actions.
+ *
+ * Runner actions post to the provider runner route; direct actions hit the
+ * action's own plugin route with an optional {@link ActionInvocation} envelope.
+ */
 import { mergeActionContextPayload } from "./admin-context";
-import { hasJsonBody, readPath } from "./admin-manifest";
+import {
+  formOptionValue,
+  hasJsonBody,
+  isValidFormFieldValue,
+  readPath,
+} from "./admin-manifest";
 import { DEFAULT_ACTION_RUNNER_ROUTE, normalizePluginRoute, providerPluginRoute } from "./shared";
 import type {
   ActionButtonContext,
@@ -84,6 +96,7 @@ export function actionRequestBody(
   );
 }
 
+/** Builds fetch init for an action call, including JSON bodies for body-ful methods. */
 export function actionRequestInit(
   action: RunnableAction,
   context: ActionButtonContext | undefined,
@@ -95,9 +108,12 @@ export function actionRequestInit(
   const headers = new Headers();
   const init: RequestInit = { headers, method, signal };
 
-  if (hasJsonBody(method)) {
+  const body = actionRequestBody(action, context, target, payload);
+  const hasBodyContent = typeof body === "object" && body !== null && Object.keys(body).length > 0;
+  // DELETE still carries a JSON body when the action computed parameters.
+  if (hasJsonBody(method) || hasBodyContent) {
     headers.set("Content-Type", "application/json");
-    init.body = JSON.stringify(actionRequestBody(action, context, target, payload));
+    init.body = JSON.stringify(body);
   }
 
   return init;
@@ -192,6 +208,7 @@ export function actionTargetValidationError(
   return null;
 }
 
+/** Returns the first client-side validation error blocking submit, if any. */
 export function actionSubmitValidationError(
   action: Pick<ActionManifestDescriptor, "form" | "target">,
   target: ActionTarget | undefined,
@@ -218,31 +235,11 @@ function coerceFormFieldValue(field: ActionFormField, value: unknown) {
   if (field.type === "boolean") return value === true || value === "true";
   if (field.type === "select" && field.options) {
     const option = field.options.find(
-      (candidate) => String(optionValue(candidate)) === String(value),
+      (candidate) => String(formOptionValue(candidate)) === String(value),
     );
-    return option ? optionValue(option) : value;
+    return option ? formOptionValue(option) : value;
   }
   return value;
-}
-
-function isValidFormFieldValue(field: ActionFormField, value: unknown) {
-  const type = field.type ?? "string";
-  if (type === "number") return Number.isFinite(typeof value === "number" ? value : Number(value));
-  if (type === "integer") {
-    const number = typeof value === "number" ? value : Number(value);
-    return Number.isInteger(number);
-  }
-  if (type === "boolean") return typeof value === "boolean";
-  if (type === "select" && field.options) {
-    return field.options.some(
-      (option) => optionValue(option) === value || String(optionValue(option)) === value,
-    );
-  }
-  return true;
-}
-
-function optionValue(option: NonNullable<ActionFormField["options"]>[number]) {
-  return typeof option === "object" && option !== null ? option.value : option;
 }
 
 function targetMetadata(

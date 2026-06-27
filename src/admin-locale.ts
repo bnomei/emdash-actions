@@ -1,3 +1,7 @@
+/**
+ * Admin UI locale detection from the `emdash-locale` cookie, with a hook that
+ * re-syncs on focus so in-tab locale switches are picked up without reload.
+ */
 import { useEffect, useState } from "react";
 import { DEFAULT_LOCALE, normalizeLocale } from "./i18n";
 
