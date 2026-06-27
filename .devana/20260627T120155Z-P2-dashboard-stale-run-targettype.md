@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | high | security=no
+DEVANA-STATE: fixed | P2 | high | security=no
 DEVANA-KEY: src/admin.tsx:385 | dashboard-stale-run-targettype
 
 # Dashboard targetType change does not abort in-flight action runs
@@ -47,6 +47,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Dashboard analogue of stale-run-after-context-change. Confirmed the dashboard load effect aborted only its manifest controller on `targetType` change, leaving in-flight `runAbortControllers` active to complete and run effects/patches against a stale closure action after the surface filter switched. Added a dedicated effect with deps `[targetType]` whose cleanup aborts every entry in `runAbortControllers.current`. Aborted runs bail via the centralized guard in waitForActionResult (poll-terminal-ignores-abort); their `finally` still clears busy state (the `busyKeysRef` reset is unconditional, and the controller-dict delete is gated so it won't drop a newer run's controller). No clearing of the dict in the new effect — aborting alone avoids any interplay with the finally's gate. Typecheck + full suite (51 tests) pass.
 
 DEVANA-KEY: src/admin.tsx:385 | dashboard-stale-run-targettype
-DEVANA-SUMMARY: open | P2 | high | Dashboard runs are not aborted when targetType changes, so stale completions can still run client effects after the widget switches surface filters.
+DEVANA-SUMMARY: fixed | P2 | high | A targetType-change effect now aborts in-flight dashboard run controllers, so a run started under a prior surface filter bails instead of applying effects/patches after the widget switches surfaces.

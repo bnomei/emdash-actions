@@ -403,6 +403,19 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
     };
   }, []);
 
+  // Abort in-flight action runs when the surface filter (`targetType`) changes.
+  // The load effect replaces `state.actions` for the new surface; without this,
+  // a run started under the previous filter could complete and apply effects/
+  // patches against a stale closure action. Aborted runs bail via the abort
+  // guard in waitForActionResult; their finally still clears busy state.
+  useEffect(() => {
+    return () => {
+      for (const controller of Object.values(runAbortControllers.current)) {
+        controller.abort();
+      }
+    };
+  }, [targetType]);
+
   function clearActionFeedback(actionKey: string) {
     const timer = feedbackTimers.current[actionKey];
     if (timer) {
