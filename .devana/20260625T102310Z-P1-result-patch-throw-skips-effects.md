@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-Priority: P1 | Confidence: high | Security-sensitive: no | Status: open
+Priority: P1 | Confidence: high | Security-sensitive: no | Status: fixed
 Location: src/admin-effects.ts:121 | Slug: result-patch-throw-skips-effects
 
 # Invalid action patch throws after success, skipping effects and field writeback
@@ -77,6 +77,7 @@ successful result.
 ## Status Notes
 
 - 2026-06-25: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `actionPatchFromResult` used throwing readers (`readRequiredLocalizedString` for label, etc.); a malformed patch on a successful result threw after `showActionToasts` and before `runActionEffects`/`applyFieldResultValue`. Chose option (b) — per-field tolerance — over wrapping call sites, so a valid `tone` still applies even when `label` is invalid. Added a `readPatchField` helper that catches reader errors and returns a `PATCH_FIELD_DROP` sentinel (distinct from a legitimate `null`); each field keeps what parses and drops what throws. Both call sites (`applyActionUpdate`, `mergeActionResultPatch`) benefit since they share this function. Added a regression test (`label: ""` no-throw, `{label:"", tone:"info"}` → `{tone:"info"}`, `{icon:42, disabled:true}` → `{disabled:true}`). Typecheck + effects tests (7) pass.
 
 DEVANA-KEY: src/admin-effects.ts:121 | P1 | result-patch-throw-skips-effects
-DEVANA-SUMMARY: Status=open | P1 high src/admin-effects.ts:121 - An invalid action patch field (e.g. empty label) in a successful result throws inside actionPatchFromResult, skipping effects and field writeback and surfacing an internal validation error after the success toast.
+DEVANA-SUMMARY: Status=fixed | P1 high src/admin-effects.ts:121 - actionPatchFromResult now drops malformed optional patch fields instead of throwing, so effects and field writeback still run on a successful result and no internal validation error follows the success toast.

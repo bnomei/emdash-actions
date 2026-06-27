@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  actionPatchFromResult,
   actionResultEffects,
   asDownloadEffect,
   asReloadEffect,
@@ -68,6 +69,19 @@ describe("admin action effects", () => {
       id: "publish",
       label: "Published",
       route: "publish",
+      disabled: true,
+    });
+  });
+
+  it("drops malformed action patch fields instead of throwing on success", () => {
+    // An invalid optional patch field must not abort the post-success
+    // sequence (effects / field writeback); it is dropped, valid fields kept.
+    expect(() => actionPatchFromResult({ action: { label: "" } })).not.toThrow();
+    expect(actionPatchFromResult({ action: { label: "   " } })).toBe(null);
+    expect(actionPatchFromResult({ action: { label: "", tone: "info" } })).toEqual({
+      tone: "info",
+    });
+    expect(actionPatchFromResult({ action: { icon: 42, disabled: true } })).toEqual({
       disabled: true,
     });
   });

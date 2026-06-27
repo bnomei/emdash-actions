@@ -112,26 +112,61 @@ export function effectsFromResultEffect(
   return null;
 }
 
+// Sentinel returned by `readPatchField` when a patch reader throws, so an
+// invalid field is dropped without being confused for a legitimate `null`.
+const PATCH_FIELD_DROP = Symbol("patch-field-drop");
+
+// A successful terminal result must still run effects and (in field mode) the
+// result writeback even when the server attaches a malformed `action` patch.
+// Validate each optional patch field tolerantly: keep what parses, drop what
+// throws, and never abort the post-success sequence over a cosmetic field.
+function readPatchField<T>(read: () => T): T | typeof PATCH_FIELD_DROP {
+  try {
+    return read();
+  } catch {
+    return PATCH_FIELD_DROP;
+  }
+}
+
 export function actionPatchFromResult(result: ActionRunResult): ActionResultActionPatch | null {
   const patch = asRecord(result.action);
   if (!patch) return null;
 
   const next: ActionResultActionPatch = {};
   if (Object.hasOwn(patch, "label")) {
-    next.label = readRequiredLocalizedString(patch.label, "action.label");
+    const label = readPatchField(() => readRequiredLocalizedString(patch.label, "action.label"));
+    if (label !== PATCH_FIELD_DROP) next.label = label;
   }
-  if (Object.hasOwn(patch, "icon")) next.icon = readNullableString(patch.icon, "action.icon");
-  if (Object.hasOwn(patch, "tone")) next.tone = readNullableTone(patch.tone, "action.tone");
+  if (Object.hasOwn(patch, "icon")) {
+    const icon = readPatchField(() => readNullableString(patch.icon, "action.icon"));
+    if (icon !== PATCH_FIELD_DROP) next.icon = icon;
+  }
+  if (Object.hasOwn(patch, "tone")) {
+    const tone = readPatchField(() => readNullableTone(patch.tone, "action.tone"));
+    if (tone !== PATCH_FIELD_DROP) next.tone = tone;
+  }
   if (Object.hasOwn(patch, "description")) {
-    next.description = readNullableLocalizedString(patch.description, "action.description");
+    const description = readPatchField(() =>
+      readNullableLocalizedString(patch.description, "action.description"),
+    );
+    if (description !== PATCH_FIELD_DROP) next.description = description;
   }
   if (Object.hasOwn(patch, "disabled")) {
-    next.disabled = readOptionalBoolean(patch.disabled, "action.disabled") ?? false;
+    const disabled = readPatchField(
+      () => readOptionalBoolean(patch.disabled, "action.disabled") ?? false,
+    );
+    if (disabled !== PATCH_FIELD_DROP) next.disabled = disabled;
   }
   if (Object.hasOwn(patch, "confirm")) {
-    next.confirm = readNullableLocalizedString(patch.confirm, "action.confirm");
+    const confirm = readPatchField(() =>
+      readNullableLocalizedString(patch.confirm, "action.confirm"),
+    );
+    if (confirm !== PATCH_FIELD_DROP) next.confirm = confirm;
   }
-  if (Object.hasOwn(patch, "payload")) next.payload = readNullablePayload(patch.payload);
+  if (Object.hasOwn(patch, "payload")) {
+    const payload = readPatchField(() => readNullablePayload(patch.payload));
+    if (payload !== PATCH_FIELD_DROP) next.payload = payload;
+  }
 
   return Object.keys(next).length > 0 ? next : null;
 }
