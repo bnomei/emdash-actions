@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P1 | high | security=no
+DEVANA-STATE: fixed | P1 | high | security=no
 DEVANA-KEY: src/admin-polling.ts:73 | noncanonical-jobstatus-stops-poll
 
 # Non-canonical jobStatus stops polling in a non-terminal state
@@ -45,6 +45,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed `shouldContinuePolling` only continued for the three canonical pending strings, so a non-canonical in-progress `jobStatus` like "processing" stopped the loop (false success at 200; stuck UI at 202). Aligned with the documented oracle (examples/async-job.md: poll until succeeded/failed/cancelled): `shouldContinuePolling` now continues for any non-terminal jobStatus via a new exported `isTerminalJobStatus` helper (succeeded + failed/cancelled), which `isTerminalJobResult` also reuses. The unknown status keeps polling until a terminal state or the poll timeout, so no premature success and no permanent stall. `resultToneStatus`'s canonical PENDING set is unchanged (display nuance only). Added tests: "processing"/"in_progress" continue polling and are not classified as success/error. Typecheck + polling tests (7) pass.
 
 DEVANA-KEY: src/admin-polling.ts:73 | noncanonical-jobstatus-stops-poll
-DEVANA-SUMMARY: open | P1 | high | A non-canonical jobStatus such as "processing" stops polling without reaching a terminal state, causing false success at status 200 or a stuck progress UI at status 202.
+DEVANA-SUMMARY: fixed | P1 | high | shouldContinuePolling now treats any non-terminal jobStatus (incl. non-canonical labels like "processing") as pending, so polling continues to a terminal state instead of false success at 200 or a stuck UI at 202.

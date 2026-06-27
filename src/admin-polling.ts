@@ -96,14 +96,23 @@ export function shouldStartPolling(
 export function shouldContinuePolling(result: ActionRunResult) {
   if (result.ok === false) return false;
   const jobStatus = readJobStatus(result);
-  if (jobStatus) return PENDING_JOB_STATUSES.has(jobStatus);
+  // Per examples/async-job.md, polling continues until jobStatus reaches a
+  // terminal state (succeeded/failed/cancelled). Any other non-empty status —
+  // including non-canonical in-progress labels like "processing" or
+  // "in_progress" — is treated as still pending rather than stopping the loop
+  // in limbo (which would be a false success at 200 or a stuck UI at 202).
+  if (jobStatus) return !isTerminalJobStatus(jobStatus);
   return result.status === 202;
+}
+
+export function isTerminalJobStatus(jobStatus: string) {
+  return jobStatus === "succeeded" || FAILED_JOB_STATUSES.has(jobStatus);
 }
 
 export function isTerminalJobResult(result: ActionRunResult) {
   const jobStatus = readJobStatus(result);
   if (jobStatus) {
-    return jobStatus === "succeeded" || FAILED_JOB_STATUSES.has(jobStatus);
+    return isTerminalJobStatus(jobStatus);
   }
   return result.ok === false || (typeof result.status === "number" && result.status !== 202);
 }

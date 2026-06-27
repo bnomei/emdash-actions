@@ -125,6 +125,15 @@ describe("admin action polling", () => {
     expect(isSuccessfulTerminalResult({ jobStatus: "succeeded", ok: true, status: 202 })).toBe(
       true,
     );
+
+    // A non-canonical in-progress jobStatus must keep polling, not be treated
+    // as a terminal success (status 200) or a stuck state (status 202).
+    expect(shouldContinuePolling({ jobStatus: "processing", ok: true, status: 200 })).toBe(true);
+    expect(shouldContinuePolling({ jobStatus: "in_progress", ok: true, status: 202 })).toBe(true);
+    expect(isSuccessfulTerminalResult({ jobStatus: "processing", ok: true, status: 200 })).toBe(
+      false,
+    );
+    expect(isErrorResult({ jobStatus: "processing", ok: true, status: 200 })).toBe(false);
     expect(
       isSuccessfulTerminalResult({
         effects: { reload: { scope: "entry" } },
