@@ -6,12 +6,7 @@
  * action's own plugin route with an optional {@link ActionInvocation} envelope.
  */
 import { mergeActionContextPayload } from "./admin-context";
-import {
-  formOptionValue,
-  hasJsonBody,
-  isValidFormFieldValue,
-  readPath,
-} from "./admin-manifest";
+import { formOptionValue, hasJsonBody, isValidFormFieldValue, readPath } from "./admin-manifest";
 import { DEFAULT_ACTION_RUNNER_ROUTE, normalizePluginRoute, providerPluginRoute } from "./shared";
 import type {
   ActionButtonContext,

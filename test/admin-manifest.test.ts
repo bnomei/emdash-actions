@@ -286,9 +286,7 @@ describe("admin manifest parsing", () => {
               runner: true,
               form: {
                 mode: "inline",
-                fields: [
-                  { name: "scope", type: "select", options: ["a"], default: "b" },
-                ],
+                fields: [{ name: "scope", type: "select", options: ["a"], default: "b" }],
               },
             },
           ],

@@ -21,10 +21,7 @@ describe("normalizeProviders", () => {
       { pluginId: "another-good" },
     ]);
 
-    expect(result.map((provider) => provider.pluginId)).toEqual([
-      "good-provider",
-      "another-good",
-    ]);
+    expect(result.map((provider) => provider.pluginId)).toEqual(["good-provider", "another-good"]);
   });
 
   it("drops a provider with an invalid route without aborting the rest", () => {
