@@ -180,21 +180,21 @@ export function normalizeProviders(
       const pluginId = normalizePluginId(provider.pluginId);
 
       if (seenPluginIds.has(pluginId)) return [];
-      seenPluginIds.add(pluginId);
 
-      return [
-        {
-          ...provider,
-          pluginId,
-          allowedTargetPluginIds: (provider.allowedTargetPluginIds ?? []).map(normalizePluginId),
-          manifestRoute: normalizePluginRoute(
-            provider.manifestRoute?.trim() || DEFAULT_MANIFEST_ROUTE,
-          ),
-          ...(provider.runnerRoute
-            ? { runnerRoute: normalizePluginRoute(provider.runnerRoute.trim()) }
-            : {}),
-        },
-      ];
+      const normalizedProvider = {
+        ...provider,
+        pluginId,
+        allowedTargetPluginIds: (provider.allowedTargetPluginIds ?? []).map(normalizePluginId),
+        manifestRoute: normalizePluginRoute(
+          provider.manifestRoute?.trim() || DEFAULT_MANIFEST_ROUTE,
+        ),
+        ...(provider.runnerRoute
+          ? { runnerRoute: normalizePluginRoute(provider.runnerRoute.trim()) }
+          : {}),
+      };
+
+      seenPluginIds.add(pluginId);
+      return [normalizedProvider];
     } catch {
       return [];
     }

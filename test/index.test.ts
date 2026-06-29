@@ -46,4 +46,14 @@ describe("normalizeProviders", () => {
     expect(result.map((provider) => provider.pluginId)).toEqual(["cache-actions", "second"]);
     expect(result[0]?.manifestRoute).toBe("actions");
   });
+
+  it("does not reserve a provider id when that provider fails normalization", () => {
+    const result = normalizeProviders([
+      { pluginId: "cache-actions", manifestRoute: "a?b" },
+      { pluginId: "cache-actions", manifestRoute: "actions" },
+    ]);
+
+    expect(result.map((provider) => provider.pluginId)).toEqual(["cache-actions"]);
+    expect(result[0]?.manifestRoute).toBe("actions");
+  });
 });

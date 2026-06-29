@@ -50,6 +50,7 @@ import {
 import {
   actionFormInitialValues,
   actionFormPayload,
+  actionFormValuesWithFieldValue,
   actionMatchesTargetRequirement,
   actionRequestInit,
   actionRequestRoute,
@@ -922,6 +923,14 @@ function ActionButtonFieldContent({
     };
   }, [label, options, targetType, value, entryKey]);
 
+  useEffect(() => {
+    const valueKey = optionalFieldString(options?.valueKey);
+    if (!valueKey) return;
+    setFormValues((current) =>
+      actionFormValuesWithFieldValue(action?.form, current, valueKey, value),
+    );
+  }, [action?.form, options?.valueKey, value]);
+
   function clearFieldFeedback() {
     if (feedbackTimer.current) {
       globalThis.clearTimeout(feedbackTimer.current);
@@ -961,7 +970,13 @@ function ActionButtonFieldContent({
 
     if (!action) return;
     const target = fieldActionTarget(context, { id, label, required, value });
-    const validationError = actionSubmitValidationError(action, target, formValues);
+    const submitFormValues = actionFormValuesWithFieldValue(
+      action.form,
+      formValues,
+      optionalFieldString(options?.valueKey),
+      value,
+    );
+    const validationError = actionSubmitValidationError(action, target, submitFormValues);
     if (validationError) {
       setError(validationError);
       return;
@@ -1001,7 +1016,7 @@ function ActionButtonFieldContent({
           fieldActionTarget(actionContext, { id, label, required, value }),
           controller.signal,
           i18n,
-          actionFormPayload(liveAction.form, formValues),
+          actionFormPayload(liveAction.form, submitFormValues),
         ),
       );
       const finalResult = await waitForActionResult(

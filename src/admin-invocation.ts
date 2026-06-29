@@ -149,6 +149,17 @@ export function actionFormInitialValues(
   return values;
 }
 
+export function actionFormValuesWithFieldValue(
+  form: ActionFormMetadata | undefined,
+  values: Record<string, unknown>,
+  valueKey: string | undefined,
+  value: unknown,
+) {
+  if (!valueKey || !form?.fields.some((field) => field.name === valueKey)) return values;
+  if (Object.is(values[valueKey], value)) return values;
+  return { ...values, [valueKey]: value };
+}
+
 export function actionFormPayload(
   form: ActionFormMetadata | undefined,
   values: Record<string, unknown> | undefined,

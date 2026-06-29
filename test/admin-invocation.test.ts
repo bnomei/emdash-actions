@@ -3,6 +3,7 @@ import {
   actionFormInitialValues,
   actionFormPayload,
   actionFormValidationError,
+  actionFormValuesWithFieldValue,
   actionMatchesTargetRequirement,
   actionInvocationForAction,
   actionRequestInit,
@@ -237,5 +238,31 @@ describe("admin action invocation requests", () => {
         { prompt: "Go" },
       ),
     ).toBe("Action target entryId is missing.");
+  });
+
+  it("keeps field value-key form values in sync with the current field value", () => {
+    const form = {
+      mode: "inline" as const,
+      fields: [
+        { name: "value", type: "string" as const },
+        { name: "format", type: "string" as const },
+      ],
+    };
+    const values = { format: "short", value: "Previous title" };
+
+    expect(actionFormValuesWithFieldValue(form, values, "value", "Current title")).toEqual({
+      format: "short",
+      value: "Current title",
+    });
+    expect(
+      actionFormPayload(
+        form,
+        actionFormValuesWithFieldValue(form, values, "value", "Current title"),
+      ),
+    ).toEqual({
+      format: "short",
+      value: "Current title",
+    });
+    expect(actionFormValuesWithFieldValue(form, values, "missing", "Current title")).toBe(values);
   });
 });
