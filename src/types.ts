@@ -1,3 +1,11 @@
+/**
+ * Shared contract types for EmDash action manifests, invocations, targets, and
+ * run results.
+ *
+ * Providers declare {@link ActionManifestDescriptor} entries; the admin runtime
+ * maps them to {@link ActionTarget} surfaces (dashboard, entry, field, row) and
+ * interprets {@link ActionRunResult} envelopes for polling, effects, and patches.
+ */
 import type { ActionsI18nConfig, LocalizedString } from "./i18n";
 
 export type ActionMethod = "POST" | "PUT" | "PATCH" | "DELETE";

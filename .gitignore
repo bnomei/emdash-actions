@@ -4,6 +4,8 @@ node_modules
 .DS_Store
 .vite
 .vite-plus
+.devana
+.frigg
 
 # Test build output
 test-dist/

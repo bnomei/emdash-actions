@@ -3,6 +3,7 @@ import {
   actionFormInitialValues,
   actionFormPayload,
   actionFormValidationError,
+  actionFormValuesWithFieldValue,
   actionMatchesTargetRequirement,
   actionInvocationForAction,
   actionRequestInit,
@@ -39,6 +40,41 @@ describe("admin action invocation requests", () => {
     expect(actionRequestRoute(action)).toBe("/_emdash/api/plugins/source/field/slugify");
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ static: true, value: "from-manifest" }));
+  });
+
+  it("sends a JSON body for a DELETE action that carries form/payload input", () => {
+    const action = {
+      id: "purge",
+      label: "Purge",
+      method: "DELETE" as const,
+      provider,
+      route: "purge",
+      targetPluginId: "source",
+    };
+
+    const init = actionRequestInit(action, undefined, undefined, undefined, { scope: "drafts" });
+
+    expect(init.method).toBe("DELETE");
+    expect(init.headers).toBeInstanceOf(Headers);
+    expect((init.headers as Headers).get("Content-Type")).toBe("application/json");
+    expect(init.body).toBe(JSON.stringify({ scope: "drafts" }));
+  });
+
+  it("sends no body for a parameterless DELETE action", () => {
+    const action = {
+      id: "purge",
+      label: "Purge",
+      method: "DELETE" as const,
+      provider,
+      route: "purge",
+      targetPluginId: "source",
+    };
+
+    const init = actionRequestInit(action, undefined, undefined);
+
+    expect(init.method).toBe("DELETE");
+    expect(init.body).toBeUndefined();
+    expect((init.headers as Headers).get("Content-Type")).toBe(null);
   });
 
   it("posts runner actions to the provider runner route as ActionInvocation", () => {
@@ -202,5 +238,31 @@ describe("admin action invocation requests", () => {
         { prompt: "Go" },
       ),
     ).toBe("Action target entryId is missing.");
+  });
+
+  it("keeps field value-key form values in sync with the current field value", () => {
+    const form = {
+      mode: "inline" as const,
+      fields: [
+        { name: "value", type: "string" as const },
+        { name: "format", type: "string" as const },
+      ],
+    };
+    const values = { format: "short", value: "Previous title" };
+
+    expect(actionFormValuesWithFieldValue(form, values, "value", "Current title")).toEqual({
+      format: "short",
+      value: "Current title",
+    });
+    expect(
+      actionFormPayload(
+        form,
+        actionFormValuesWithFieldValue(form, values, "value", "Current title"),
+      ),
+    ).toEqual({
+      format: "short",
+      value: "Current title",
+    });
+    expect(actionFormValuesWithFieldValue(form, values, "missing", "Current title")).toBe(values);
   });
 });

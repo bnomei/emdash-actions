@@ -1,3 +1,10 @@
+/**
+ * Action run result normalization, server-driven descriptor patches, and
+ * client-side result effects (clipboard, download, open, reload).
+ *
+ * Effects are isolated per kind so one failure does not skip the rest or
+ * reclassify a provider-successful run as an admin failure.
+ */
 import { apiFetch } from "emdash/plugin-utils";
 import { localizedString } from "./i18n";
 import { providerPluginRoute, normalizePluginRoute } from "./shared";
@@ -39,19 +46,28 @@ export type ReloadEffect = {
   delayMs?: number;
 };
 
+type ActionEffectName = "clipboard" | "download" | "open" | "reload";
+
 type ActionEffectDependencies = {
   writeClipboardText?: (text: string) => Promise<void>;
   runDownloadEffect?: (action: ActionEffectTarget, effect: DownloadEffect) => Promise<void>;
   runOpenEffect?: (effect: { url: string; target: ActionResultOpenTarget }) => void;
-  scheduleReload?: (action: ActionManifestDescriptor, effect: ReloadEffect) => void;
+  scheduleReload?: (
+    action: ActionManifestDescriptor,
+    effect: ReloadEffect,
+    signal?: AbortSignal,
+  ) => void;
+  onEffectError?: (name: ActionEffectName, error: unknown) => void;
+  reloadSignal?: AbortSignal;
 };
 
+/** Normalizes provider response bodies into the shared {@link ActionRunResult} envelope. */
 export function normalizeActionRunResult(
   action: Pick<ActionManifestDescriptor, "resultEffect">,
   value: unknown,
 ): ActionRunResult {
   const record = asRecord(value);
-  if (record) return record as ActionRunResult;
+  if (record) return normalizeResultRecord(record);
 
   if (typeof value === "string") {
     const effects = effectsFromResultEffect(action.resultEffect, value);
@@ -84,6 +100,32 @@ export function normalizeActionRunResult(
   };
 }
 
+function normalizeResultRecord(record: Record<string, unknown>): ActionRunResult {
+  const result = { ...record } as ActionRunResult;
+
+  if ("status" in record) {
+    const status = coerceFiniteNumber(record.status);
+    if (status === null) delete result.status;
+    else result.status = status;
+  }
+
+  if ("ok" in record && typeof record.ok !== "boolean") {
+    // Non-boolean `ok` values fail safe to an error classification.
+    result.ok = record.ok === "true" || record.ok === 1;
+  }
+
+  return result;
+}
+
+function coerceFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 export function effectsFromResultEffect(
   preset: ActionResultEffectPreset | undefined,
   value: string,
@@ -112,26 +154,56 @@ export function effectsFromResultEffect(
   return null;
 }
 
+// Distinguishes a thrown patch field from a legitimate `null` patch value.
+const PATCH_FIELD_DROP = Symbol("patch-field-drop");
+
+function readPatchField<T>(read: () => T): T | typeof PATCH_FIELD_DROP {
+  try {
+    return read();
+  } catch {
+    return PATCH_FIELD_DROP;
+  }
+}
+
 export function actionPatchFromResult(result: ActionRunResult): ActionResultActionPatch | null {
   const patch = asRecord(result.action);
   if (!patch) return null;
 
   const next: ActionResultActionPatch = {};
   if (Object.hasOwn(patch, "label")) {
-    next.label = readRequiredLocalizedString(patch.label, "action.label");
+    const label = readPatchField(() => readRequiredLocalizedString(patch.label, "action.label"));
+    if (label !== PATCH_FIELD_DROP) next.label = label;
   }
-  if (Object.hasOwn(patch, "icon")) next.icon = readNullableString(patch.icon, "action.icon");
-  if (Object.hasOwn(patch, "tone")) next.tone = readNullableTone(patch.tone, "action.tone");
+  if (Object.hasOwn(patch, "icon")) {
+    const icon = readPatchField(() => readNullableString(patch.icon, "action.icon"));
+    if (icon !== PATCH_FIELD_DROP) next.icon = icon;
+  }
+  if (Object.hasOwn(patch, "tone")) {
+    const tone = readPatchField(() => readNullableTone(patch.tone, "action.tone"));
+    if (tone !== PATCH_FIELD_DROP) next.tone = tone;
+  }
   if (Object.hasOwn(patch, "description")) {
-    next.description = readNullableLocalizedString(patch.description, "action.description");
+    const description = readPatchField(() =>
+      readNullableLocalizedString(patch.description, "action.description"),
+    );
+    if (description !== PATCH_FIELD_DROP) next.description = description;
   }
   if (Object.hasOwn(patch, "disabled")) {
-    next.disabled = readOptionalBoolean(patch.disabled, "action.disabled") ?? false;
+    const disabled = readPatchField(
+      () => readOptionalBoolean(patch.disabled, "action.disabled") ?? false,
+    );
+    if (disabled !== PATCH_FIELD_DROP) next.disabled = disabled;
   }
   if (Object.hasOwn(patch, "confirm")) {
-    next.confirm = readNullableLocalizedString(patch.confirm, "action.confirm");
+    const confirm = readPatchField(() =>
+      readNullableLocalizedString(patch.confirm, "action.confirm"),
+    );
+    if (confirm !== PATCH_FIELD_DROP) next.confirm = confirm;
   }
-  if (Object.hasOwn(patch, "payload")) next.payload = readNullablePayload(patch.payload);
+  if (Object.hasOwn(patch, "payload")) {
+    const payload = readPatchField(() => readNullablePayload(patch.payload));
+    if (payload !== PATCH_FIELD_DROP) next.payload = payload;
+  }
 
   return Object.keys(next).length > 0 ? next : null;
 }
@@ -180,6 +252,12 @@ export function actionPatchChangesLabel(result: ActionRunResult) {
   return asRecord(result.action)?.label !== undefined;
 }
 
+export function actionPatchChangesPayload(result: ActionRunResult) {
+  const patch = asRecord(result.action);
+  return patch !== null && Object.hasOwn(patch, "payload");
+}
+
+/** Dispatches result effects from a terminal run; failures are reported via `onEffectError`. */
 export async function runActionEffects(
   action: ActionEffectTarget,
   result: ActionRunResult,
@@ -192,19 +270,35 @@ export async function runActionEffects(
   const runDownload = dependencies.runDownloadEffect ?? runDownloadEffect;
   const runOpen = dependencies.runOpenEffect ?? runOpenEffect;
   const reload = dependencies.scheduleReload ?? scheduleReload;
+  const onEffectError = dependencies.onEffectError ?? noopEffectError;
 
-  const clipboard = clipboardEffectText(effects.clipboard);
-  if (clipboard !== null) await writeClipboard(clipboard);
+  async function runEffect(name: ActionEffectName, run: () => void | Promise<void>) {
+    try {
+      await run();
+    } catch (error) {
+      onEffectError(name, error);
+    }
+  }
 
-  const download = asDownloadEffect(effects.download);
-  if (download) await runDownload(action, download);
-
-  const open = asOpenEffect(effects.open);
-  if (open) runOpen(open);
-
-  const reloadEffect = asReloadEffect(effects.reload);
-  if (reloadEffect) reload(action, reloadEffect);
+  await runEffect("clipboard", async () => {
+    const clipboard = clipboardEffectText(effects.clipboard);
+    if (clipboard !== null) await writeClipboard(clipboard);
+  });
+  await runEffect("download", async () => {
+    const download = asDownloadEffect(effects.download);
+    if (download) await runDownload(action, download);
+  });
+  await runEffect("open", () => {
+    const open = asOpenEffect(effects.open);
+    if (open) runOpen(open);
+  });
+  await runEffect("reload", () => {
+    const reloadEffect = asReloadEffect(effects.reload);
+    if (reloadEffect) reload(action, reloadEffect, dependencies.reloadSignal);
+  });
 }
+
+const noopEffectError: (name: ActionEffectName, error: unknown) => void = () => {};
 
 export function actionResultEffects(result: ActionRunResult): ActionResultEffects | null {
   const effects = asRecord(result.effects) ? ({ ...result.effects } as ActionResultEffects) : {};
@@ -283,11 +377,12 @@ function readReloadScope(value: unknown): ActionReloadScope | undefined {
 }
 
 export function runOpenEffect(effect: { url: string; target: ActionResultOpenTarget }) {
-  const url = safeBrowserUrl(effect.url);
   if (effect.target === "self") {
+    const url = safeBrowserUrl(effect.url, { sameOrigin: true });
     globalThis.location.assign(url.href);
     return;
   }
+  const url = safeBrowserUrl(effect.url);
   globalThis.open(url.href, "_blank", "noopener,noreferrer");
 }
 
@@ -328,15 +423,24 @@ export function triggerDownload(url: string, filename: string | undefined) {
 export function scheduleReload(
   action: Pick<ActionManifestDescriptor, "cooldownMs">,
   effect: ReloadEffect | number | undefined,
+  signal?: AbortSignal,
 ) {
+  // Widget lifetime: skip reload when the initiating surface has unmounted.
+  if (signal?.aborted) return;
   const reloadEffect = typeof effect === "number" ? { delayMs: effect } : (effect ?? {});
   const delayMs = reloadEffect.delayMs;
   const delay = clampFeedbackMs(delayMs ?? feedbackCooldownMs(action));
-  globalThis.setTimeout(() => {
+  const timer = globalThis.setTimeout(() => {
+    signal?.removeEventListener("abort", onAbort);
     const scope = reloadEffect.scope ?? "page";
     const shouldContinue = dispatchReloadEvent(action, { ...reloadEffect, scope });
     if (shouldContinue) globalThis.location?.reload();
   }, delay);
+
+  function onAbort() {
+    globalThis.clearTimeout(timer);
+  }
+  signal?.addEventListener("abort", onAbort, { once: true });
 }
 
 function dispatchReloadEvent(
@@ -357,11 +461,18 @@ function dispatchReloadEvent(
   );
 }
 
-export function safeBrowserUrl(value: string) {
+/**
+ * Resolves action URLs for browser effects; `sameOrigin` blocks off-origin
+ * same-tab navigation from server-controlled `open` targets.
+ */
+export function safeBrowserUrl(value: string, options: { sameOrigin?: boolean } = {}) {
   const base = typeof window === "undefined" ? "http://localhost" : window.location.href;
   const url = new URL(value, base);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Action URL must use http, https, or be relative.");
+  }
+  if (options.sameOrigin && url.origin !== new URL(base).origin) {
+    throw new Error("Action URL must stay on the current origin.");
   }
   return url;
 }

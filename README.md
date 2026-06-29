@@ -278,6 +278,14 @@ POST /_emdash/api/plugins/cache-actions/cache/clear
 Field buttons can also skip the manifest and call a direct route from field
 options. Dashboard discovery uses `actionsPlugin({ providers })`.
 
+> **Manifest caching:** the dashboard widget fetches provider manifests once per
+> mount (and again when the target surface changes). Manifests are treated as
+> deployment-static, so adding or changing actions server-side mid-session is
+> picked up after a page reload rather than automatically. This is intentional —
+> background refetching would discard in-memory action patches (toggle labels,
+> updated payloads) and churn the action list. During provider development,
+> reload the admin page to see manifest changes.
+
 Manifest actions can also use runner mode:
 
 ```ts

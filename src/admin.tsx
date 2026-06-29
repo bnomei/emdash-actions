@@ -1,3 +1,9 @@
+/**
+ * EmDash admin UI for action triggers: dashboard widget and field button field.
+ *
+ * Widgets load provider manifests per mount/surface, run actions with abort-aware
+ * lifecycles, apply result patches, and dispatch client effects after terminal success.
+ */
 import {
   Badge,
   Banner,
@@ -37,12 +43,14 @@ import {
   fieldActionTarget,
   contextForAction,
   readActionContextValue,
+  readEntryContextRoute,
   resolveDashboardContext,
   resolveFieldContext,
 } from "./admin-context";
 import {
   actionFormInitialValues,
   actionFormPayload,
+  actionFormValuesWithFieldValue,
   actionMatchesTargetRequirement,
   actionRequestInit,
   actionRequestRoute,
@@ -50,6 +58,7 @@ import {
 } from "./admin-invocation";
 import {
   actionPatchChangesLabel,
+  actionPatchChangesPayload,
   actionPatchFromResult,
   feedbackCooldownMs,
   mergeActionPatch,
@@ -80,6 +89,7 @@ import {
 import {
   isErrorResult,
   isSuccessfulTerminalResult,
+  normalizePollResult,
   readJobStatus,
   resultPhase,
   resultToneStatus,
@@ -172,6 +182,7 @@ const actionToastManager = createKumoToastManager();
 
 type DestructiveActionConfirm = (message: string) => boolean;
 
+/** Gate for `confirm`-backed actions; injectable for tests. */
 export function confirmDestructiveAction(
   message: string | undefined,
   confirm: DestructiveActionConfirm = globalThis.confirm.bind(globalThis),
@@ -357,6 +368,8 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
   const [formValuesByKey, setFormValuesByKey] = useState<Record<string, ActionFormValues>>({});
   const feedbackTimers = useRef<Record<string, FeedbackTimer>>({});
   const runAbortControllers = useRef<Record<string, AbortController>>({});
+  const lifetime = useRef<AbortController | null>(null);
+  lifetime.current ??= new AbortController();
   const responseI18n = state.status === "ready" ? state.i18n : undefined;
   const i18n = useActionI18n(mergeI18n(contextI18n(context), responseI18n));
   const targetType = dashboardActionTarget(context).type;
@@ -394,8 +407,18 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
         controller.abort();
       }
       runAbortControllers.current = {};
+      lifetime.current?.abort();
     };
   }, []);
+
+  // Surface filter changes supersede in-flight dashboard runs.
+  useEffect(() => {
+    return () => {
+      for (const controller of Object.values(runAbortControllers.current)) {
+        controller.abort();
+      }
+    };
+  }, [targetType]);
 
   function clearActionFeedback(actionKey: string) {
     const timer = feedbackTimers.current[actionKey];
@@ -501,10 +524,21 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
           pollActionStatus(nextAction, statusRoute, signal, i18n),
         controller.signal,
       );
-      showActionToasts(finalResult, i18n);
       if (isSuccessfulTerminalResult(finalResult)) {
         const updated = applyActionUpdate(action, finalResult);
-        await runActionEffects(action, finalResult);
+        if (updated && actionPatchChangesPayload(finalResult)) {
+          setFormValuesByKey((current) => {
+            if (!(action.key in current)) return current;
+            const next = { ...current };
+            delete next[action.key];
+            return next;
+          });
+        }
+        await runActionEffects(action, finalResult, {
+          reloadSignal: lifetime.current?.signal,
+        });
+        // Toasts run after patches and effects so failures do not pair with success toasts.
+        showActionToasts(finalResult, i18n);
         if (updated && actionPatchChangesLabel(finalResult)) {
           clearActionFeedback(action.key);
         } else {
@@ -520,6 +554,7 @@ function ActionsWidgetContent({ context }: DashboardWidgetProps = {}) {
           );
         }
       } else {
+        showActionToasts(finalResult, i18n);
         setActionFeedback(
           action,
           feedbackFromResult(
@@ -787,6 +822,7 @@ function inputTypeForFormField(type: ActionFormField["type"]) {
   return "text";
 }
 
+/** Field widget that runs a provider action or copies a value to the clipboard. */
 export function ActionButtonField(props: FieldWidgetProps<ActionButtonFieldOptions>) {
   return (
     <ActionRuntimeShell>
@@ -813,8 +849,17 @@ function ActionButtonFieldContent({
   const [formValues, setFormValues] = useState<ActionFormValues>({});
   const feedbackTimer = useRef<FeedbackTimer | null>(null);
   const runAbortController = useRef<AbortController | null>(null);
+  const runInFlight = useRef(false);
+  const lifetime = useRef<AbortController | null>(null);
+  lifetime.current ??= new AbortController();
   const i18n = useActionI18n(mergeI18n(contextI18n(context), options?.i18n));
   const targetType = fieldActionTarget(context, { id, label, required, value }).type;
+  const entryRoute = readEntryContextRoute();
+  const entryKey = [
+    context?.collection ?? entryRoute.collection ?? "",
+    context?.entryId ?? entryRoute.entryId ?? "",
+    context?.entryLocale ?? entryRoute.entryLocale ?? "",
+  ].join("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -857,7 +902,8 @@ function ActionButtonFieldContent({
       active = false;
       controller.abort();
     };
-  }, [label, options, targetType, value]);
+    // `value` is merged at submit time; `entryKey` reloads patched descriptors on navigation.
+  }, [label, options, targetType, entryKey]);
 
   useEffect(() => {
     return () => {
@@ -867,8 +913,23 @@ function ActionButtonFieldContent({
       }
       runAbortController.current?.abort();
       runAbortController.current = null;
+      lifetime.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      runAbortController.current?.abort();
+    };
+  }, [label, options, targetType, value, entryKey]);
+
+  useEffect(() => {
+    const valueKey = optionalFieldString(options?.valueKey);
+    if (!valueKey) return;
+    setFormValues((current) =>
+      actionFormValuesWithFieldValue(action?.form, current, valueKey, value),
+    );
+  }, [action?.form, options?.valueKey, value]);
 
   function clearFieldFeedback() {
     if (feedbackTimer.current) {
@@ -909,7 +970,13 @@ function ActionButtonFieldContent({
 
     if (!action) return;
     const target = fieldActionTarget(context, { id, label, required, value });
-    const validationError = actionSubmitValidationError(action, target, formValues);
+    const submitFormValues = actionFormValuesWithFieldValue(
+      action.form,
+      formValues,
+      optionalFieldString(options?.valueKey),
+      value,
+    );
+    const validationError = actionSubmitValidationError(action, target, submitFormValues);
     if (validationError) {
       setError(validationError);
       return;
@@ -919,7 +986,10 @@ function ActionButtonFieldContent({
     const confirmMessage = localizedString(action.confirm, i18n);
     if (confirmMessage && !confirmDestructiveAction(confirmMessage)) return;
 
-    runAbortController.current?.abort();
+    // `disabled={busy}` is render-async; guard double-submit in the same turn.
+    if (runInFlight.current) return;
+    runInFlight.current = true;
+
     const controller = new AbortController();
     runAbortController.current = controller;
 
@@ -934,15 +1004,19 @@ function ActionButtonFieldContent({
         controller.signal,
       );
       throwIfAborted(controller.signal);
+      const liveAction: UiAction = {
+        ...action,
+        payload: mergeFieldPayload(action.payload, options, value),
+      };
       const result = normalizeActionRunResult(
-        action,
+        liveAction,
         await callAction(
-          action,
+          liveAction,
           actionContext,
           fieldActionTarget(actionContext, { id, label, required, value }),
           controller.signal,
           i18n,
-          actionFormPayload(action.form, formValues),
+          actionFormPayload(liveAction.form, submitFormValues),
         ),
       );
       const finalResult = await waitForActionResult(
@@ -955,12 +1029,21 @@ function ActionButtonFieldContent({
           pollActionStatus(nextAction, statusRoute, signal, i18n),
         controller.signal,
       );
-      showActionToasts(finalResult, i18n);
+      throwIfAborted(controller.signal);
       if (isSuccessfulTerminalResult(finalResult)) {
         const patchedAction = mergeActionResultPatch(action, finalResult);
-        if (patchedAction) setAction(patchedAction);
-        await runActionEffects(action, finalResult);
+        if (patchedAction) {
+          setAction(patchedAction);
+          if (actionPatchChangesPayload(finalResult)) {
+            setFormValues(actionFormInitialValues(patchedAction.form, patchedAction.payload));
+          }
+        }
         applyFieldResultValue(finalResult, options, onChange);
+        await runActionEffects(action, finalResult, {
+          reloadSignal: lifetime.current?.signal,
+        });
+        // Toasts run after writeback and effects so failures do not pair with success toasts.
+        showActionToasts(finalResult, i18n);
         if (patchedAction && actionPatchChangesLabel(finalResult)) {
           clearFieldFeedback();
         } else {
@@ -976,6 +1059,7 @@ function ActionButtonFieldContent({
           );
         }
       } else {
+        showActionToasts(finalResult, i18n);
         setFieldFeedback(
           feedbackFromResult(
             action,
@@ -998,6 +1082,7 @@ function ActionButtonFieldContent({
         );
       }
     } finally {
+      runInFlight.current = false;
       if (runAbortController.current === controller) {
         runAbortController.current = null;
         setBusy(false);
@@ -1369,7 +1454,7 @@ async function pollActionStatus(
     response,
     formatActionMessage("failedToPollAction", i18n, { action: actionLabel(action, i18n ?? {}) }),
   );
-  return normalizeActionRunResult(action, result);
+  return normalizePollResult(action, statusRoute, result);
 }
 
 function showActionToasts(result: ActionRunResult, i18n: ActionsI18nConfig) {
@@ -1695,14 +1780,17 @@ function jobStatusLabel(status: ActionJobStatus | string, i18n: ActionsI18nConfi
 function progressLabel(progress: unknown) {
   const value = numberOrNull(progress);
   if (value === null) return null;
+  // Provider progress is a 0..1 fraction; values above 1 are treated as percent.
   const normalized = value <= 1 ? value * 100 : value;
   return `${Math.max(0, Math.min(100, Math.round(normalized)))}%`;
 }
 
+/** Dashboard widget registry for the actions plugin admin entry. */
 export const widgets = {
   [WIDGET_ID]: ActionsWidget,
 };
 
+/** Field widget registry; `button` runs manifest or direct provider actions. */
 export const fields = {
   button: ActionButtonField,
 };

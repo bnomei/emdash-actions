@@ -1,3 +1,10 @@
+/**
+ * Manifest parsing, field-option normalization, and shared readers for action
+ * descriptors returned by provider plugins.
+ *
+ * Parse-time validation is strict: malformed manifests throw before actions
+ * reach the admin UI; tolerant readers elsewhere handle partial result patches.
+ */
 import { DEFAULT_MANIFEST_ROUTE, normalizePluginId, normalizePluginRoute } from "./shared";
 import type {
   ActionButtonFieldOptions,
@@ -56,6 +63,7 @@ const MAX_ACTIONS_PER_PROVIDER = 50;
 const MAX_STRING_LENGTH = 220;
 const ACTION_FORM_FIELD_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$/;
 
+/** Parses and validates a provider manifest payload into typed action descriptors. */
 export function parseActionsManifest(
   value: unknown,
   provider: NormalizedActionProviderConfig,
@@ -282,6 +290,9 @@ function readOptionalTargetMetadata(
   if (value === undefined || value === null) return undefined;
   if (typeof value === "string") return { surfaces: [readTargetType(value, field)] };
   if (Array.isArray(value)) {
+    if (value.length === 0) {
+      throw new Error(`Action ${field} must list at least one surface; omit it for no restriction`);
+    }
     return {
       surfaces: [...new Set(value.map((item, index) => readTargetType(item, `${field}.${index}`)))],
     };
@@ -311,6 +322,9 @@ function readOptionalTargetSurfaces(
 ): readonly ActionTargetType[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) throw new Error(`Action ${field} must be an array`);
+  if (value.length === 0) {
+    throw new Error(`Action ${field} must list at least one surface; omit it for no restriction`);
+  }
   return [...new Set(value.map((item, index) => readTargetType(item, `${field}.${index}`)))];
 }
 
@@ -418,9 +432,43 @@ function readFormFields(value: unknown, field: string): readonly ActionFormField
     if ((input.type ?? "string") === "select" && (!input.options || input.options.length === 0)) {
       throw new Error(`Action ${field}.${index}.options is required for select fields`);
     }
+    // Reject defaults the submit validator would reject so untouched forms stay submittable.
+    if (
+      Object.hasOwn(input, "default") &&
+      !isMissingFormFieldValue(input.default) &&
+      !isValidFormFieldValue(input, input.default)
+    ) {
+      throw new Error(`Action ${field}.${index}.default is not valid for this field`);
+    }
 
     return input;
   });
+}
+
+export function formOptionValue(option: NonNullable<ActionFormField["options"]>[number]) {
+  return typeof option === "object" && option !== null ? option.value : option;
+}
+
+export function isMissingFormFieldValue(value: unknown) {
+  if (value === undefined || value === null) return true;
+  return typeof value === "string" && !value.trim();
+}
+
+/** Submit-time form value gate; shared with parse-time default validation. */
+export function isValidFormFieldValue(field: ActionFormField, value: unknown) {
+  const type = field.type ?? "string";
+  if (type === "number") return Number.isFinite(typeof value === "number" ? value : Number(value));
+  if (type === "integer") {
+    const number = typeof value === "number" ? value : Number(value);
+    return Number.isInteger(number);
+  }
+  if (type === "boolean") return typeof value === "boolean";
+  if (type === "select" && field.options) {
+    return field.options.some(
+      (option) => formOptionValue(option) === value || String(formOptionValue(option)) === value,
+    );
+  }
+  return true;
 }
 
 function readOptionalFormOptions(
