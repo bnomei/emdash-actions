@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1 - 2026-06-29
+
+- Fixed field action inline form submissions so a form field matching
+  `valueKey` stays synchronized with the current field value instead of
+  submitting a stale previous value.
+- Fixed provider discovery so an invalid provider entry no longer blocks a
+  later valid provider with the same `pluginId`.
+
 ## 0.4.0 - 2026-06-20
 
 - Added provider-owned runner actions with `runner: true`, provider
