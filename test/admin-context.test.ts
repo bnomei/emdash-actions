@@ -8,6 +8,8 @@ import {
   mergeActionContextPayload,
   readActionContextValue,
   readEntryContextRoute,
+  resolveDashboardContext,
+  resolveFieldContext,
 } from "../src/admin-context";
 import type { ActionButtonContext } from "../src/types";
 
@@ -16,6 +18,70 @@ afterEach(() => {
 });
 
 describe("admin context and route helpers", () => {
+  it("unwraps EmDash 1.2 context responses using its real CSRF-aware fetch helper", async () => {
+    vi.stubGlobal("window", {
+      location: { href: "http://localhost/_emdash/admin/content/posts/post-1" },
+    });
+    const controller = new AbortController();
+    const user = { id: "editor-1", role: 40, name: "Editor" };
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get("X-EmDash-Request")).toBe("1");
+      expect(init?.signal).toBe(controller.signal);
+      if (url === "/_emdash/api/auth/me") {
+        return Response.json({ success: true, data: user });
+      }
+      expect(url).toBe("/_emdash/api/content/posts/post-1");
+      return Response.json({
+        success: true,
+        data: {
+          item: {
+            id: "post-1",
+            slug: "saved",
+            status: "draft",
+            locale: "en",
+            data: { title: "Saved" },
+          },
+          _rev: "rev-2",
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      resolveFieldContext(undefined, { id: "field-title", value: "Unsaved" }, controller.signal),
+    ).resolves.toEqual({
+      surface: "field",
+      collection: "posts",
+      fieldName: "title",
+      fieldValue: "Unsaved",
+      entryId: "post-1",
+      entrySlug: "saved",
+      entryStatus: "draft",
+      entryLocale: "en",
+      isNew: false,
+      entryData: { title: "Saved" },
+      currentUser: user,
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not expose an EmDash error envelope as current-user context", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          {
+            success: false,
+            error: { code: "UNAUTHORIZED", message: "Not authenticated" },
+          },
+          { status: 401 },
+        ),
+      ),
+    );
+
+    await expect(resolveDashboardContext()).resolves.toEqual({ surface: "dashboard" });
+  });
+
   it("parses admin content routes and locale query parameters", () => {
     vi.stubGlobal("window", {
       location: { href: "http://localhost/admin/content/posts/post-1?locale=de" },

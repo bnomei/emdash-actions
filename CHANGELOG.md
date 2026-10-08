@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0 - 2026-10-08
+
+- Updated the EmDash dependency and peer requirement to 1.2, validated against
+  the published EmDash 1.2.0 package.
+- Explicitly required `plugins:read` for provider discovery, preserving editor
+  access under EmDash 1.2's stricter private-route permission defaults.
+- Aligned exported plugin version metadata with package version 0.5.0.
+- Updated the Node.js requirement and CI/orb toolchain to 22.22.2 for EmDash's
+  dependency requirements, and added the existing test suite to CI.
+- Added native plugin registration and CSRF-aware API response regression tests,
+  and documented provider-route permissions for EmDash 1.2.
+
 ## 0.4.1 - 2026-06-29
 
 - Fixed field action inline form submissions so a form field matching

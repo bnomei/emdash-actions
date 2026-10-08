@@ -5,7 +5,7 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 SECONDS=0
 
 # Match .github/workflows/ci.yml, including the bundled npm version.
-node_version=22.12.0
+node_version=22.22.2
 if [[ "$(node --version 2>/dev/null || true)" != "v${node_version}" ]]; then
   echo "Installing Node ${node_version}"
   case "$(uname -m)" in
@@ -21,6 +21,8 @@ if [[ "$(node --version 2>/dev/null || true)" != "v${node_version}" ]]; then
   curl --fail --silent --show-error --location --retry 3 \
     "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt" -o "$download_dir/SHASUMS256.txt"
   (cd "$download_dir"; grep "  ${archive}$" SHASUMS256.txt | sha256sum --check -)
+  # Remove the previous bundled npm so extracted dependencies cannot mix versions.
+  sudo rm -rf -- /usr/local/lib/node_modules/npm
   sudo tar -xJf "$download_dir/$archive" -C /usr/local --strip-components=1
   hash -r
 fi

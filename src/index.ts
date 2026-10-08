@@ -139,6 +139,7 @@ export function createPlugin(options: ActionsCreatePluginOptions = {}) {
     version: PLUGIN_VERSION,
     routes: {
       providers: {
+        permission: "plugins:read",
         handler: async () => providersResponse,
       },
     },

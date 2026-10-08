@@ -7,7 +7,7 @@
  */
 export const PACKAGE_NAME = "@bnomei/emdash-actions";
 export const PLUGIN_ID = "actions";
-export const PLUGIN_VERSION = "0.4.0";
+export const PLUGIN_VERSION = "0.5.0";
 export const WIDGET_ID = "actions";
 export const DEFAULT_MANIFEST_ROUTE = ".well-known/actions";
 export const DEFAULT_ACTION_RUNNER_ROUTE = ".well-known/actions/run";

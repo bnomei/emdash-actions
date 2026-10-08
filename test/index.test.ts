@@ -1,5 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { normalizeProviders } from "../src/index";
+import type { RouteContext } from "emdash";
+import { version } from "../package.json";
+import { actionsPlugin, createPlugin, normalizeProviders, PLUGIN_VERSION } from "../src/index";
+
+describe("EmDash native registration", () => {
+  it("keeps descriptor and resolved runtime metadata aligned with the package", async () => {
+    const descriptor = actionsPlugin({
+      adminEntry: "custom/admin",
+      providers: [{ pluginId: "cache-actions", manifestRoute: "/actions" }],
+      size: "third",
+      title: "Maintenance",
+    });
+    const plugin = createPlugin(descriptor.options);
+
+    expect(PLUGIN_VERSION).toBe(version);
+    expect(descriptor).toMatchObject({ id: "actions", version, format: "native" });
+    expect(plugin).toMatchObject({ id: "actions", version });
+    expect(plugin.admin.entry).toBe(descriptor.adminEntry);
+    expect(plugin.admin.widgets).toEqual([{ id: "actions", title: "Maintenance", size: "third" }]);
+    expect(plugin.admin.widgets).toEqual(descriptor.adminWidgets);
+    expect(plugin.admin.fieldWidgets).toEqual([
+      { name: "button", label: "Action Button", fieldTypes: ["json", "string", "text", "url"] },
+    ]);
+    const route = plugin.routes.providers;
+    expect(route.permission).toBe("plugins:read");
+    expect(route.public).not.toBe(true);
+    await expect(route.handler({} as RouteContext)).resolves.toEqual({
+      placement: "dashboard",
+      providers: [
+        { pluginId: "cache-actions", manifestRoute: "actions", allowedTargetPluginIds: [] },
+      ],
+      i18n: undefined,
+    });
+  });
+});
 
 describe("normalizeProviders", () => {
   it("normalizes plugin ids and routes for valid providers", () => {

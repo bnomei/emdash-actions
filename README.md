@@ -22,9 +22,17 @@ it exposes normal EmDash plugin API routes.
 
 ## Install
 
+Requires EmDash 1.2 or newer within the 1.x series and Node.js 22.22.2 or newer.
+
 ```sh
 npm install @bnomei/emdash-actions
 ```
+
+EmDash 1.2 defaults private plugin routes to `plugins:manage`. This plugin's
+provider discovery route explicitly uses `plugins:read` to retain editor access.
+Provider manifest and action routes must declare their own appropriate
+`permission` when they should be available to non-admin users; otherwise they
+remain admin-only. All admin requests use EmDash's CSRF-aware `apiFetch` helper.
 
 ## Quick Start
 
