@@ -22,7 +22,8 @@ it exposes normal EmDash plugin API routes.
 
 ## Install
 
-Requires EmDash 1.2 or newer within the 1.x series and Node.js 22.22.2 or newer.
+Requires EmDash 1.2 or newer within the 1.x series and Node.js
+`^22.22.2 || ^24.15.0 || >=26.0.0`, matching EmDash's dependency requirements.
 
 ```sh
 npm install @bnomei/emdash-actions
