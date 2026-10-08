@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This library needs no authentication or services repaired after waking.
+# Toolchains and dependencies persist in the orb; installation belongs in setup.
